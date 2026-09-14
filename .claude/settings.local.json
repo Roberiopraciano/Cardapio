@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(npx vitest *)",
+      "Bash(npx eslint *)",
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/C--Berp-dev-ReactJs-Cardapio-cardapio-final-v4/f85fbbc6-5f75-4025-9349-4cf1a4971551/scratchpad/sum.mjs\" \"C:/Users/user/AppData/Local/Temp/claude/C--Berp-dev-ReactJs-Cardapio-cardapio-final-v4/f85fbbc6-5f75-4025-9349-4cf1a4971551/scratchpad/lint2.json\")",
+      "Bash(node \"C:/Users/user/AppData/Local/Temp/claude/C--Berp-dev-ReactJs-Cardapio-cardapio-final-v4/f85fbbc6-5f75-4025-9349-4cf1a4971551/scratchpad/sum.mjs\" \"C:/Users/user/AppData/Local/Temp/claude/C--Berp-dev-ReactJs-Cardapio-cardapio-final-v4/f85fbbc6-5f75-4025-9349-4cf1a4971551/scratchpad/l3.json\")",
+      "Bash(node -e ' *)",
+      "Bash(grep -n \"^### \\\\`banners\\\\`\" BACKEND.md)",
+      "Bash(sed -n '/^### `banners`/,/^### `bannersRequired`/p' BACKEND.md)",
+      "Bash(grep -n \"^| \\\\`.*\\\\` |\" ARQUITETURA.md)"
+    ]
+  }
+}

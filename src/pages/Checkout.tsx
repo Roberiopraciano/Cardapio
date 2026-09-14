@@ -1,0 +1,566 @@
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useCartStore } from '../store/cartStore'
+import { useAppStore } from '../store/appStore'
+import { api, OrderError } from '../api/client'
+import { formatCurrency, calcCartItemSubtotal, calcTmProduto } from '../lib/pricing'
+import { findCouponByCode } from '../lib/stock'
+import { checkBranchOpen } from '../lib/businessPeriod'
+import ImageWithFallback from '../components/ImageWithFallback'
+import HeaderButton from '../components/HeaderButton'
+import Icon from '../components/Icon'
+import { pushOrderHistory } from '../lib/orderHistory'
+import { checkIdentity, identityMessage } from '../lib/identity'
+import { maskCPFInput, cpfState, CPF_MESSAGE } from '../lib/client_storage'
+import { toast } from '../store/toastStore'
+import GoogleSignInButton from '../components/GoogleSignInButton'
+import ConfirmModal from '../components/ConfirmModal'
+import { Analytics } from '../lib/analytics'
+
+export default function Checkout() {
+  const navigate = useNavigate()
+  const {
+    items, orderNote, clientName, clientPhone, clientCpf,
+    whereConsume, consumptioncode, consumptionint, appliedCoupon, couponCode,
+    clientEmail, setClientEmail,
+    setOrderNote, setClientName, setClientPhone, setClientCpf,
+    setCoupon, total, totalWithCoupon, itemCount, clearCart, loadSavedClient,
+    comanda, setComanda, clearCartKeepCodes, setWhereConsumeAsked,
+  } = useCartStore()
+  const { branch, params, offers, periods } = useAppStore()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [couponInput, setCouponInput] = useState(couponCode)
+  const [couponError, setCouponError] = useState<string | null>(null)
+  const [confirmModality, setConfirmModality] = useState(false)
+  const mode = params?.mode ?? 'mesa'
+
+  // Comanda por cliente dentro da mesa — só quando a branch liga a opção
+  const comandaEnabled = mode === 'mesa' && branch?.settingsWeb?.comandaEnabled === true
+  const comandaLabel = branch?.settingsWeb?.comandaLabel?.trim() || 'Comanda'
+  const comandaRequired = branch?.settingsWeb?.comandaRequired === true
+
+  /**
+   * Cupom vem desligado por padrão: a maioria das branches não usa, e um campo
+   * que sempre responde "cupom inválido" é pior que campo nenhum.
+   * Ligar em `settingsWeb.couponsEnabled`. A lógica de aplicação
+   * (findCouponByCode / totalWithCoupon) já está inteira e testada.
+   */
+  const COUPONS_ENABLED = branch?.settingsWeb?.couponsEnabled === true
+
+  /** E-mail é opt-in por branch: quem não usa não deve pedir dado que não vai
+   *  tratar — coletar sem finalidade é justamente o que a LGPD veda. */
+  const askEmail = branch?.settingsWeb?.askEmail === true
+
+  /** Nome + telefone para enviar pedido. Navegar o cardápio segue livre. */
+  const requireId = branch?.settingsWeb?.requireIdentification !== false
+  const identity = checkIdentity(clientName, clientPhone)
+
+  /** CPF é opcional, mas se preenchido tem de ser válido — vai na nota fiscal. */
+  const cpf = cpfState(clientCpf)
+
+  const FIELDS = [
+    {
+      key: 'name', type: 'text', inputMode: 'text' as const, autoComplete: 'name',
+      placeholder: 'Seu nome', value: clientName, onChange: setClientName,
+    },
+    {
+      key: 'phone', type: 'tel', inputMode: 'tel' as const, autoComplete: 'tel',
+      placeholder: 'Telefone', value: clientPhone, onChange: setClientPhone,
+    },
+    ...(askEmail ? [{
+      key: 'email', type: 'email', inputMode: 'email' as const, autoComplete: 'email',
+      placeholder: 'E-mail (opcional)', value: clientEmail, onChange: setClientEmail,
+    }] : []),
+    {
+      key: 'cpf', type: 'text', inputMode: 'numeric' as const, autoComplete: 'off',
+      placeholder: 'CPF na nota (opcional)', value: clientCpf,
+      // Máscara enquanto digita + corte em 11 dígitos
+      onChange: (v: string) => setClientCpf(maskCPFInput(v)),
+      error: CPF_MESSAGE[cpf],
+      valid: cpf === 'valid',
+    },
+  ]
+
+  const subtotal = total()
+  const finalTotal = totalWithCoupon()
+  const tmProduto = calcTmProduto(items, finalTotal)
+  const isEmpty = items.length === 0
+
+  // Redirect e analytics só no mount — nunca durante o render, senão o
+  // carrinho vazio derruba a tela em branco.
+  useEffect(() => {
+    if (isEmpty) { navigate('/', { replace: true }); return }
+    loadSavedClient()
+    Analytics.beginCheckout(items, finalTotal)
+  }, [])
+
+  if (isEmpty) return null
+
+  /**
+   * Volta à tela inicial para refazer a escolha. Esvazia o carrinho antes:
+   * itens montados numa modalidade não podem sobreviver à troca sem serem
+   * recalculados, e um carrinho com preços de duas modalidades é pior que
+   * pedir para o cliente montar de novo.
+   */
+  const handleChangeModality = () => {
+    if (items.length > 0) { setConfirmModality(true); return }
+    doChangeModality()
+  }
+
+  const doChangeModality = () => {
+    setConfirmModality(false)
+    clearCartKeepCodes()
+    setWhereConsumeAsked(false)
+    navigate('/', { replace: true })
+  }
+
+  const handleApplyCoupon = () => {
+    if (!COUPONS_ENABLED) return
+    setCouponError(null)
+    if (!couponInput.trim()) { setCoupon(null, ''); return }
+    const found = findCouponByCode(offers, couponInput)
+    if (!found) { setCouponError('Cupom inválido ou não encontrado.'); return }
+    setCoupon(found, couponInput)
+    setCouponError(null)
+    Analytics.applyCoupon(couponInput, subtotal)
+  }
+
+  const handleSubmit = async () => {
+    // Nome e telefone são exigidos nos dois modos: a cozinha e o garçom
+    // precisam saber de quem é o pedido, e a conta precisa de dono.
+    if (requireId && !identity.ok) {
+      const msg = identityMessage(identity.missing)
+      setError(msg)
+      toast.error(msg)
+      return
+    }
+    if (mode === 'balcao' && !clientName.trim()) {
+      setError('Informe seu nome para ser chamado no balcão.')
+      return
+    }
+    // CPF errado quebra a nota fiscal do lado do restaurante e o cliente só
+    // descobre no caixa. Barrar aqui é mais barato para todos.
+    if (cpf === 'invalid' || cpf === 'incomplete') {
+      const msg = CPF_MESSAGE[cpf]!
+      setError(msg)
+      toast.error(msg)
+      return
+    }
+    if (comandaEnabled && comandaRequired && !comanda.trim()) {
+      setError(`Informe o número da sua ${comandaLabel.toLowerCase()}.`)
+      return
+    }
+    // Sem simpleAuth o Laravel vai recusar. Avisar aqui, em vez de deixar o
+    // cliente descobrir por um 401 genérico, aponta o problema para o lado certo.
+    const simpleAuth = branch?.settingsWeb?.simpleAuth ?? ''
+    if (!simpleAuth) {
+      console.error(
+        '[pedido] branch.settingsWeb.simpleAuth está vazio — o backend vai ' +
+        'recusar. Ver BACKEND.md §1.',
+      )
+    }
+
+    setLoading(true); setError(null)
+
+    /**
+     * A loja ainda está aceitando pedido?
+     *
+     * O boot checou o horário quando o cliente abriu o cardápio — pode ter sido
+     * há duas horas. Nesse meio a casa pode ter fechado, batido o horário do
+     * período, ou o gerente pode ter pausado os pedidos. Sem reconsultar, o
+     * pedido entra na cozinha depois de o fogão desligar, e ninguém avisa o
+     * cliente que está esperando.
+     *
+     * **Falha de rede não bloqueia.** Se a consulta não responde, segue para o
+     * POST: o backend é a autoridade final e vai recusar se for o caso. Travar o
+     * pedido por um soluço de rede impediria venda legítima — e o cliente está de
+     * pé no restaurante, com o pedido montado.
+     */
+    try {
+      const fresh = await api.getBranch(params?.branchId ?? '')
+      const raw = fresh.data?.[0] as Record<string, unknown> | undefined
+      if (raw) {
+        const freshBranch = raw as unknown as typeof branch
+        const settings = (raw['settingsWeb'] ?? {}) as Record<string, unknown>
+
+        // Interruptor de pânico da casa: pausa pedidos sem mexer em horário.
+        // Ausente = aceitando, para branch que ainda não tem o campo.
+        if (settings['acceptingOrders'] === false) {
+          const msg = typeof settings['notAcceptingOrdersMessage'] === 'string'
+            && (settings['notAcceptingOrdersMessage'] as string).trim()
+            ? (settings['notAcceptingOrdersMessage'] as string)
+            : 'A loja pausou os pedidos no momento. Chame um atendente.'
+          setError(msg); toast.error(msg); setLoading(false)
+          return
+        }
+
+        const closed = freshBranch ? checkBranchOpen(freshBranch, periods) : null
+        if (closed) {
+          const msg = closed === 'branchInactive'
+            ? 'A loja não está aceitando pedidos agora.'
+            : 'A loja fechou enquanto você montava o pedido. Chame um atendente.'
+          setError(msg); toast.error(msg); setLoading(false)
+          return
+        }
+      }
+    } catch (e) {
+      // Só registra: o POST adiante decide
+      console.warn('[pedido] não foi possível reverificar se a loja está aberta', e)
+    }
+
+    try {
+      const payload = {
+        branch: params?.branchId ?? '',
+        simpleAuth,
+        consumptioncode, consumptionint,
+        locationType: 8,
+        amount: finalTotal, subtotal, total: finalTotal,
+        totemClientName: clientName,
+        phone: clientPhone,
+        // Só dígitos no payload — o backend não deve receber máscara
+        cpfCustomer: clientCpf.replace(/\D/g, '') || undefined,
+        ...(askEmail && clientEmail.trim() ? { email: clientEmail.trim() } : {}),
+        // Só vai no payload quando a branch usa comanda e o cliente informou
+        ...(comandaEnabled && comanda.trim() ? { comanda: comanda.trim() } : {}),
+        note: orderNote || undefined,
+        paymentMethod: {
+          type: mode === 'balcao' ? 'counter' : 'table',
+          kind: 'Cardápio',
+          label: mode === 'balcao' ? 'Pagar no balcão' : 'Pagar na mesa',
+        },
+        additionalInfo: {
+          modality: whereConsume === 'OnLocal' ? 'Consumir no local' : 'Para levar',
+          whereConsume,
+        },
+        origin: 'cardapio',
+        ...(tmProduto > 0 ? { tmProduto } : {}),
+        ...(appliedCoupon ? { coupon: {
+          _id: appliedCoupon._id, title: appliedCoupon.title,
+          triggers: appliedCoupon.triggers, rules: appliedCoupon.rules, rewards: appliedCoupon.rewards,
+        }} : {}),
+        items: items.map((item) => ({
+          product: item.product._id,
+          name: item.product.name,
+          originalPrice: item.product.price ?? 0,
+          amount: calcCartItemSubtotal(item),
+          price: item.product.price ?? 0,
+          quantity: item.quantity,
+          note: item.note ?? '',
+          complements: buildComplements(item.addedComplements),
+        })),
+      }
+
+      const result = await api.postOrder(payload)
+
+      // Registro local do cliente. Depois do POST e fora do caminho de erro:
+      // falha ao gravar histórico não pode impedir a confirmação de um pedido
+      // que já entrou na cozinha.
+      pushOrderHistory({
+        at: new Date().toISOString(),
+        branchId: params?.branchId ?? '',
+        branchName: branch?.name,
+        mode,
+        table: params?.table,
+        consumptioncode,
+        consumptionint,
+        comanda: comandaEnabled && comanda.trim() ? comanda.trim() : undefined,
+        total: finalTotal,
+        orderId: (result as { _id?: string } | null)?._id,
+        items: items.map((item) => ({
+          name: item.product.name,
+          quantity: item.quantity,
+          amount: calcCartItemSubtotal(item),
+          extras: item.addedComplements
+            .filter((c) => !c.isPackaging)
+            .map((c) => {
+              const total = c.quantity * item.quantity
+              return total > 1 ? `${total}× ${c.name}` : c.name
+            }),
+        })),
+      })
+
+      clearCart()
+      navigate('/confirmacao', { state: { order: result, consumptioncode, consumptionint } })
+    } catch (e) {
+      // Mensagem específica por causa: CORS, simpleAuth recusado e validação
+      // exigem consertos diferentes, e "tente novamente" não distingue nenhum
+      const msg = e instanceof OrderError
+        ? e.clientMessage
+        : 'Erro ao enviar pedido. Tente novamente.'
+      setError(msg)
+      toast.error(msg)
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div className="min-h-screen"
+      style={{ background: 'var(--bg-page)', paddingBottom: 'calc(210px + env(safe-area-inset-bottom, 0px))' }}>
+      {/* Header */}
+      <div className="px-4 py-4 flex items-center gap-3 sticky top-0 z-10 shadow-sm" style={{ background: 'var(--bg-card)' }}>
+        <HeaderButton icon="back" onClick={() => navigate(-1)} label="Voltar" emphasis />
+        <div className="flex-1">
+          <h1 className="text-base font-bold" style={{ color: 'var(--text-hi)' }}>Revisar pedido</h1>
+          {consumptioncode && (
+            <p className="text-xs" style={{ color: 'var(--text-lo)' }}>
+              {mode === 'mesa' ? `Mesa ${consumptioncode}` : `Senha ${consumptioncode}`}
+              {consumptionint ? ` · #${consumptionint}` : ''}
+            </p>
+          )}
+        </div>
+        <span className="text-sm" style={{ color: 'var(--text-lo)' }}>{itemCount()} itens</span>
+      </div>
+
+      <div className="px-4 pt-4 flex flex-col gap-4">
+        {/* Itens */}
+        <div className="rounded-2xl overflow-hidden border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          {items.map((item, idx) => (
+            <div key={idx} className="flex items-start gap-3 p-4 border-b last:border-0"
+              style={{ borderColor: 'var(--divider)' }}>
+              <ImageWithFallback src={item.product.image} alt={item.product.name}
+                className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>{item.product.name}</p>
+                {item.addedComplements.filter(c=>!c.isPackaging).length > 0 && (
+                  <p className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--text-lo)' }}>
+                    {/* Quantidade efetiva (por unidade × qtd do item) — é o que
+                        o cliente recebe e o que a conta cobra */}
+                    {item.addedComplements
+                      .filter(c => !c.isPackaging)
+                      .map(c => {
+                        const total = c.quantity * item.quantity
+                        return total > 1 ? `${total}× ${c.name}` : c.name
+                      })
+                      .join(', ')}
+                  </p>
+                )}
+                {item.addedComplements.some(c=>c.isPackaging) && (
+                  <p className="text-xs mt-0.5 text-emerald-600">+ Embalagem p/ levar</p>
+                )}
+                {item.note && <p className="text-xs mt-0.5 text-amber-600">Obs: {item.note}</p>}
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-lo)' }}>{item.quantity}×</p>
+              </div>
+              <p className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--text-hi)' }}>
+                {formatCurrency(calcCartItemSubtotal(item))}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/*
+          Somente leitura de propósito.
+
+          A modalidade define embalagem (grupos com autoAdd) e pode definir
+          preço. Trocar aqui, com o carrinho montado, exigiria recalcular tudo
+          o que já foi escolhido — e é justamente aí que aparecem itens com
+          preço de uma modalidade e embalagem de outra. Para mudar, o cliente
+          volta à tela inicial, onde o carrinho ainda está vazio.
+        */}
+        <div className="rounded-2xl p-4 border flex items-center gap-3"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'var(--color-brand-light)' }}>
+            <Icon name={whereConsume === 'OnLocal' ? 'menu' : 'takeaway'}
+              size={16} color="var(--color-brand)" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs" style={{ color: 'var(--text-lo)' }}>Modalidade</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>
+              {whereConsume === 'OnLocal' ? 'Comer aqui' : 'Para levar'}
+            </p>
+          </div>
+          <button
+            onClick={handleChangeModality}
+            className="text-xs font-semibold px-3 py-2 rounded-lg border flex-shrink-0"
+            style={{ borderColor: 'var(--border)', color: 'var(--color-brand)' }}
+          >
+            Trocar
+          </button>
+        </div>
+
+        {/* Cupom — controlado por settingsWeb.couponsEnabled */}
+        <div className="rounded-2xl p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)', opacity: COUPONS_ENABLED ? 1 : 0.55 }}>
+          <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-hi)' }}>Cupom de desconto</p>
+          <div className="flex gap-2">
+            <input type="text"
+              placeholder={COUPONS_ENABLED ? 'Código do cupom' : 'Indisponível no momento'}
+              disabled={!COUPONS_ENABLED}
+              value={couponInput} onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(null) }}
+              onKeyDown={(e) => e.key === 'Enter' && handleApplyCoupon()}
+              className="flex-1 text-sm rounded-xl px-3 py-2.5 outline-none uppercase disabled:cursor-not-allowed"
+              style={{ background: 'var(--bg-input)', color: 'var(--text-hi)', border: '1px solid var(--border)' }} />
+            <button onClick={handleApplyCoupon}
+              disabled={!COUPONS_ENABLED}
+              className="px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:cursor-not-allowed"
+              style={{ backgroundColor: !COUPONS_ENABLED ? 'var(--text-lo)' : appliedCoupon ? '#6b7280' : 'var(--color-brand)' }}>
+              {appliedCoupon ? 'Remover' : 'Aplicar'}
+            </button>
+          </div>
+          {!COUPONS_ENABLED && (
+            <p className="text-xs mt-1.5" style={{ color: 'var(--text-lo)' }}>
+              Cupons ainda não estão disponíveis neste cardápio.
+            </p>
+          )}
+          {COUPONS_ENABLED && couponError && <p className="text-xs text-red-500 mt-1.5">{couponError}</p>}
+          {COUPONS_ENABLED && appliedCoupon && (
+            <p className="text-xs text-emerald-600 mt-1.5 font-medium">
+              ✓ {appliedCoupon.title} — desconto de {formatCurrency(subtotal - finalTotal)} aplicado
+            </p>
+          )}
+        </div>
+
+        {/* Obs geral */}
+        <div className="rounded-2xl p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-hi)' }}>
+            Observação geral <span className="font-normal" style={{ color: 'var(--text-lo)' }}>(opcional)</span>
+          </label>
+          <textarea value={orderNote} onChange={(e) => setOrderNote(e.target.value)}
+            placeholder="Ex: alergia a amendoim..." rows={2}
+            className="w-full text-sm resize-none outline-none placeholder-gray-300"
+            style={{ color: 'var(--text-hi)', background: 'transparent' }} />
+        </div>
+
+        {/* Comanda (mesa com comanda ligada) */}
+        {comandaEnabled && (
+          <div className="rounded-2xl p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            <label className="block text-sm font-semibold mb-1" style={{ color: 'var(--text-hi)' }}>
+              {comandaLabel} {comandaRequired
+                ? <span className="text-red-500">*</span>
+                : <span className="font-normal" style={{ color: 'var(--text-lo)' }}>(opcional)</span>}
+            </label>
+            <p className="text-xs mb-2" style={{ color: 'var(--text-lo)' }}>
+              Informe o número da sua {comandaLabel.toLowerCase()} para seus pedidos
+              ficarem separados dos das outras pessoas da mesa.
+            </p>
+            <input
+              type="text" inputMode="numeric"
+              placeholder={`Número da ${comandaLabel.toLowerCase()}`}
+              value={comanda}
+              onChange={(e) => setComanda(e.target.value)}
+              className="w-full text-sm rounded-xl px-3 py-3 outline-none"
+              style={{ background: 'var(--bg-input)', color: 'var(--text-hi)', border: '1px solid var(--border)' }}
+            />
+          </div>
+        )}
+
+        {/* Identificação */}
+        <div className="rounded-2xl p-4 border flex flex-col gap-3"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <p className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>
+            Identificação {requireId
+              ? <span style={{ color: '#dc2626' }}>*</span>
+              : <span className="font-normal" style={{ color: 'var(--text-lo)' }}>(opcional)</span>}
+          </p>
+          {requireId && (
+            <p className="text-xs -mt-1" style={{ color: 'var(--text-lo)' }}>
+              Nome e telefone são necessários para o pedido chegar até você.
+            </p>
+          )}
+          {comandaEnabled && (
+            /* A comanda já identifica a conta; o nome aqui é só para o pedido
+               aparecer com dono na tela da conta e o garçom saber de quem é. */
+            <p className="text-xs -mt-1" style={{ color: 'var(--text-lo)' }}>
+              A {comandaLabel.toLowerCase()} já separa a sua conta. O nome é só para
+              seus pedidos aparecerem identificados.
+            </p>
+          )}
+          <GoogleSignInButton />
+
+          {FIELDS.map((field) => (
+            <div key={field.key}>
+              <div className="relative">
+                <input
+                  type={field.type}
+                  inputMode={field.inputMode}
+                  autoComplete={field.autoComplete}
+                  placeholder={field.placeholder}
+                  value={field.value}
+                  onChange={(e) => field.onChange(e.target.value)}
+                  className="w-full text-sm rounded-xl px-3 py-3 outline-none"
+                  style={{
+                    background: 'var(--bg-input)',
+                    color: 'var(--text-hi)',
+                    border: `1px solid ${field.error ? '#dc2626' : 'var(--border)'}`,
+                    paddingRight: field.valid ? 38 : undefined,
+                  }}
+                />
+                {field.valid && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2"
+                    style={{ color: 'var(--color-brand)' }}>
+                    <Icon name="check" size={13} />
+                  </span>
+                )}
+              </div>
+              {field.error && (
+                <p className="text-xs mt-1" style={{ color: '#dc2626' }}>{field.error}</p>
+              )}
+            </div>
+          ))}
+          {mode === 'balcao' && (
+            <p className="text-xs text-amber-600">Seu nome será chamado quando o pedido estiver pronto.</p>
+          )}
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Barra de total — encostada na TabBar, não no fundo da tela.
+          Sem esse deslocamento a aba cobria o botão de enviar o pedido. */}
+      <div className="fixed left-0 right-0 border-t px-4 py-3 z-20"
+        style={{
+          background: 'var(--bg-card)',
+          borderColor: 'var(--border)',
+          bottom: 'calc(58px + env(safe-area-inset-bottom, 0px))',
+        }}>
+        {appliedCoupon && (
+          <div className="flex justify-between text-sm mb-1">
+            <span style={{ color: 'var(--text-lo)' }}>Subtotal</span>
+            <span style={{ color: 'var(--text-lo)' }}>{formatCurrency(subtotal)}</span>
+          </div>
+        )}
+        {appliedCoupon && (
+          <div className="flex justify-between text-sm mb-1 text-emerald-600">
+            <span>Desconto ({appliedCoupon.title})</span>
+            <span>−{formatCurrency(subtotal - finalTotal)}</span>
+          </div>
+        )}
+        <div className="flex justify-between items-center mb-2.5">
+          <span className="font-semibold" style={{ color: 'var(--text-hi)' }}>Total</span>
+          <span className="text-lg font-bold" style={{ color: 'var(--text-hi)' }}>{formatCurrency(finalTotal)}</span>
+        </div>
+        <button onClick={handleSubmit} disabled={loading}
+          className="w-full py-4 rounded-xl text-white font-semibold text-base disabled:opacity-60 active:scale-[0.98] transition-transform"
+          style={{ backgroundColor: 'var(--color-brand)' }}>
+          {loading ? 'Enviando...' : mode === 'balcao' ? 'Fazer pedido no balcão' : 'Fazer pedido na mesa'}
+        </button>
+      </div>
+
+      <ConfirmModal
+        open={confirmModality}
+        destructive
+        title="Trocar a modalidade?"
+        message="Comer aqui e para levar têm embalagem e preços diferentes. Seu carrinho será esvaziado e você volta à escolha inicial."
+        confirmLabel="Sim, trocar"
+        cancelLabel="Manter como está"
+        onConfirm={doChangeModality}
+        onCancel={() => setConfirmModality(false)}
+      />
+    </div>
+  )
+}
+
+function buildComplements(c: import('../types').CartComplement[]): import('../types').OrderComplementGroup[] {
+  const groups = new Map<string, import('../types').OrderComplementGroup>()
+  for (const comp of c) {
+    if (!groups.has(comp.groupId)) groups.set(comp.groupId, { _id: comp.groupId, name: comp.groupName, items: [] })
+    const g = groups.get(comp.groupId)!
+    const ex = g.items.find(i => i._id === comp._id)
+    if (ex) ex.quantity += comp.quantity
+    else g.items.push({ _id: comp._id, name: comp.name, price: comp.price, quantity: comp.quantity, unitFraction: comp.unitFraction })
+  }
+  return [...groups.values()]
+}
