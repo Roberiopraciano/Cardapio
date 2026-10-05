@@ -18,6 +18,7 @@ import {
   calcUnitPrice,
   includedAllowance,
   calcCartTotal,
+  calcPackagingTotal,
   formatCurrency,
   calcTmProduto,
 } from '../lib/pricing'
@@ -677,6 +678,31 @@ describe('calcCartTotal', () => {
       makeCartItem({ product: makeProduct({ price: 25 }), quantity: 2, addedComplements: [], subTotal: 50 }),
     ]
     expect(calcCartTotal(items)).toBeCloseTo(60)
+  })
+})
+
+describe('calcPackagingTotal', () => {
+  it('soma somente embalagens e considera quantidade do produto', () => {
+    const items = [makeCartItem({
+      quantity: 2,
+      addedComplements: [
+        { _id: 'emb', name: 'Sacola', price: 1, quantity: 1, groupId: 'ge', groupName: 'Embalagem', isPackaging: true },
+        { _id: 'add', name: 'Bacon', price: 5, quantity: 1, groupId: 'ga', groupName: 'Adicionais' },
+      ],
+    })]
+
+    expect(calcPackagingTotal(items)).toBeCloseTo(2)
+  })
+
+  it('respeita quantidade e fração cadastradas na embalagem', () => {
+    const items = [makeCartItem({
+      quantity: 3,
+      addedComplements: [
+        { _id: 'emb', name: 'Embalagem', price: 2, quantity: 2, unitFraction: 0.5, groupId: 'ge', groupName: 'Embalagem', isPackaging: true },
+      ],
+    })]
+
+    expect(calcPackagingTotal(items)).toBeCloseTo(6)
   })
 })
 

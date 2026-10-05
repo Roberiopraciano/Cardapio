@@ -62,8 +62,11 @@ Client ID do Google).
   "comandaLabel": "Comanda",
   "comandaRequired": false,
 
+  // ── Pagamento ──────────────────────────────────────────────────
+  "totemPaymentEnabled": false,         // padrão: false — "Pagar no totem" (QR). Ver TotemApiv2/docs/TOTEM_HANDOFF.md
+
   // ── Comercial ──────────────────────────────────────────────────
-  "couponsEnabled": false,              // padrão: false
+  "couponsEnabled": false,              // true libera cupons nesta unidade; padrão: false
 
   // ── Analytics ──────────────────────────────────────────────────
   "metaPixelId": "123456789012345",

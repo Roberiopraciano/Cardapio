@@ -48,8 +48,8 @@ interface CartStore {
   setClientPhone: (p: string) => void
   setClientCpf: (c: string) => void
   loadSavedClient: () => void
-  /** @param digitos dígitos da senha do balcão (settingsWeb.passwordDigits) */
-  initCodes: (mode: 'mesa' | 'balcao', table: string, digitos?: number) => void
+  /** Inicializa a identificação da mesa ou a senha alfanumérica do balcão. */
+  initCodes: (mode: 'mesa' | 'balcao', table: string) => void
   total: () => number
   totalWithCoupon: () => number
   itemCount: () => number
@@ -268,10 +268,10 @@ export const useCartStore = create<CartStore>()(
         })
       },
 
-      initCodes: (mode, table, digitos) => {
+      initCodes: (mode, table) => {
         if (get().consumptioncode) return
         set({
-          consumptioncode: gerarConsumptionCode(mode, table, digitos),
+          consumptioncode: gerarConsumptionCode(mode, table),
           consumptionint: getOrCreateNumero(),
           // A senha entra na contagem de validade: senha de ontem cai numa
           // comanda que já foi fechada e paga
@@ -283,6 +283,9 @@ export const useCartStore = create<CartStore>()(
       totalWithCoupon: () => {
         const base = calcCartTotal(get().items)
         const coupon = get().appliedCoupon
+        if (typeof coupon?.validatedDiscount === 'number') {
+          return Math.max(0, base - coupon.validatedDiscount)
+        }
         if (!coupon?.rewards?.discountType) return base
         const { type, value } = coupon.rewards.discountType
         if (type === 2) return Math.max(0, base - value)

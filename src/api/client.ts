@@ -113,7 +113,12 @@ export interface TableOrderItem {
   amount?: number
   price?: number
   note?: string
-  complements?: Array<{ name?: string; items?: Array<{ name?: string; quantity?: number }> }>
+  /**
+   * Dois formatos convivem: o antigo, agrupado (`{ name, items: [...] }`), e o
+   * plano, um objeto por item escolhido — o que o totem manda e o cardápio
+   * passou a mandar. Ler sempre por `complementEntries()`.
+   */
+  complements?: Array<{ name?: string; quantity?: number; items?: Array<{ name?: string; quantity?: number }> }>
   /** Desconto aplicado neste item específico (cortesia, promoção do item…) */
   discount?: number
 
@@ -125,6 +130,11 @@ export interface TableOrderItem {
   unitPrice?: number
   /** Para onde o item foi, quando `transferred` (ex: `MESA_07`). */
   transferredTo?: string
+}
+
+/** Complementos de um item como lista plana, aceitando os dois formatos. */
+export function complementEntries(item: TableOrderItem): Array<{ name?: string; quantity?: number }> {
+  return (item.complements ?? []).flatMap((c) => (Array.isArray(c.items) ? c.items : [c]))
 }
 
 /** Item que entra na soma — o resto aparece riscado, informando o motivo. */
@@ -197,8 +207,8 @@ export class OrderError extends Error {
   readonly body: unknown
   readonly detail?: string
 
-  constructor(status: number, body: unknown, detail?: string) {
-    super(`POST api/orders falhou (${status})`)
+  constructor(status: number, body: unknown, detail?: string, path = 'api/orders') {
+    super(`POST ${path} falhou (${status})`)
     this.name = 'OrderError'
     this.status = status
     this.body = body
@@ -245,6 +255,31 @@ export class OrderError extends Error {
   }
 }
 
+/**
+ * Pré-pedido "Pagar no totem", como o backend devolve na criação.
+ * `qr` é o texto exato a codificar — o totem só aceita o prefixo `BERPTOTEM:`.
+ */
+export interface TotemHandoff {
+  id: string
+  /** Alias compatível da senha oficial (`consumptioncode`) para digitação manual. */
+  code: string
+  /** Senha confirmada pelo backend e usada em todo o restante do fluxo. */
+  consumptioncode: string
+  token: string
+  qr: string
+  status: TotemHandoffStatus
+  total: number
+  discount: number
+  /** ISO em UTC */
+  expiresAt: string
+}
+
+/**
+ * `consumed` é o único estado de pagamento que o app afirma: quem grava é o
+ * totem, depois do TEF aprovar — não é dedução do app.
+ */
+export type TotemHandoffStatus = 'pending' | 'consumed' | 'cancelled' | 'expired'
+
 export const api = {
   getBranch: (id: string) =>
     request<{ data: unknown[] }>(`api/branches?_id=${id}`),
@@ -275,8 +310,36 @@ export const api = {
 
   getOffers: (branchId: string) =>
     request<{ data: unknown[] }>(
-      `api/offers?branch=${branchId}&disabled=false&$limit=false`
+      `api/offers?branch=${branchId}&active=true&disabled=false&$limit=false`
     ),
+
+  validateCoupon: async (payload: unknown): Promise<{
+    valid: boolean
+    reason?: string
+    message: string
+    discount: number
+    total?: number
+    appliesTo?: string[]
+    stackableWithCashback?: boolean
+  }> => {
+    const path = 'api/coupons/validate'
+    let res: Response
+    try {
+      res = await fetch(`${BASE_URL}/${path}`, withTimeout({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      }))
+    } catch (e) {
+      throw new ApiError(0, path, e instanceof Error ? e.message : 'network')
+    }
+
+    const body = await res.json().catch(() => ({
+      valid: false, message: 'Não foi possível validar o cupom.', discount: 0,
+    }))
+    if (!res.ok && res.status !== 422) throw new ApiError(res.status, path)
+    return body
+  },
 
   /** POST api/orders — auth via simpleAuth no body */
   postOrder: async (payload: unknown) => {
@@ -308,6 +371,57 @@ export const api = {
     }
 
     return body as Record<string, unknown> | null
+  },
+
+  /**
+   * POST api/totem-handoffs — "Pagar no totem".
+   *
+   * Não cria pedido em `orders`: grava um pré-pedido que o totem lê pelo QR,
+   * cobra no TEF e só então vira pedido de verdade. Mesmo payload do
+   * POST api/orders, mesmos erros (`OrderError`).
+   */
+  postTotemHandoff: async (payload: unknown): Promise<TotemHandoff> => {
+    const path = 'api/totem-handoffs'
+    let res: Response
+    try {
+      res = await fetch(`${BASE_URL}/${path}`, withTimeout({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      }))
+    } catch (e) {
+      throw new OrderError(0, null, e instanceof Error ? e.message : 'network', path)
+    }
+
+    const raw = await res.text()
+    let body: unknown
+    try { body = raw ? JSON.parse(raw) : null } catch { body = raw }
+
+    if (!res.ok) {
+      console.error('[totem] falhou', { status: res.status, resposta: body, payloadEnviado: payload })
+      throw new OrderError(res.status, body, undefined, path)
+    }
+    return body as TotemHandoff
+  },
+
+  /** Poll da tela do QR. 404 = o pré-pedido sumiu (tratado como expirado). */
+  getTotemHandoffStatus: (token: string) =>
+    request<{ code: string; status: TotemHandoffStatus; claimed: boolean; expiresAt: string }>(
+      `api/totem-handoffs/${encodeURIComponent(token)}/status`,
+    ),
+
+  /** Cliente desistiu antes de pagar. 409 = o totem já cobrou. */
+  cancelTotemHandoff: async (token: string): Promise<{ ok: boolean; status?: TotemHandoffStatus }> => {
+    try {
+      const res = await fetch(
+        `${BASE_URL}/api/totem-handoffs/${encodeURIComponent(token)}/cancel`,
+        withTimeout({ method: 'POST', headers: { Accept: 'application/json' } }),
+      )
+      const body = await res.json().catch(() => ({})) as { status?: TotemHandoffStatus }
+      return { ok: res.ok, status: body.status }
+    } catch {
+      return { ok: false }
+    }
   },
 
   /** GET api/orders por consumptioncode — polling de status e conta da mesa */

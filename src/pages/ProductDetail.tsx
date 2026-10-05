@@ -25,7 +25,7 @@ export default function ProductDetail() {
   const isEditMode = editIndex !== null
 
   const navigate = useNavigate()
-  const { products, periods, params, groupCategories, branch } = useAppStore()
+  const { products, periods, params, groupCategories } = useAppStore()
   const tr = useContentTranslator()
   const { addItem, updateItem, items, initCodes } = useCartStore()
   const product = products.find((p) => p._id === id)
@@ -297,9 +297,7 @@ export default function ProductDetail() {
       return
     }
     if (params) {
-      // Dígitos da senha vêm da branch — mais dígitos, menos chance de duas
-      // pessoas receberem a mesma senha no mesmo serviço
-      initCodes(params.mode, params.table, branch?.settingsWeb?.passwordDigits)
+      initCodes(params.mode, params.table)
     }
     if (isEditMode && editIndex !== null) {
       updateItem(editIndex, cartComplements, note, qty)

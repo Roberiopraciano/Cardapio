@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -37,8 +37,32 @@ const TUNNEL_HOSTS = [
  */
 const PWA_IN_DEV = process.env.VITE_PWA_DEV === 'true'
 
-export default defineConfig({
-  server: { host: true, allowedHosts: TUNNEL_HOSTS },
+/**
+ * Modo de teste local (só `npm run dev`): o app fala com o próprio Vite, que
+ * repassa as chamadas. Liga quando `DEV_PROXY_API` está no `.env.development.local`
+ * — ver o bloco "Testar localmente" no `.env.example`.
+ *
+ * - `/api/totem-handoffs` → `DEV_PROXY_LOCAL_API` (Laravel local, enquanto as
+ *   rotas novas não estão em produção)
+ * - todo o resto de `/api` → `DEV_PROXY_API` (a API de verdade)
+ */
+function devProxy(env: Record<string, string>): Record<string, ProxyOptions> | undefined {
+  const remote = env.DEV_PROXY_API
+  if (!remote) return undefined
+  const local = env.DEV_PROXY_LOCAL_API
+
+  return {
+    ...(local ? { '/api/totem-handoffs': { target: local, changeOrigin: true } } : {}),
+    '/api': { target: remote, changeOrigin: true },
+  }
+}
+
+export default defineConfig(({ mode }) => ({
+  server: {
+    host: true,
+    allowedHosts: TUNNEL_HOSTS,
+    proxy: devProxy(loadEnv(mode, process.cwd(), '')),
+  },
 
   /**
    * `preview` tem lista própria — não herda a do `server`. Sem isso,
@@ -105,4 +129,4 @@ export default defineConfig({
       },
     }),
   ],
-})
+}))

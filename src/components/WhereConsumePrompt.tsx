@@ -14,7 +14,13 @@ import Flag from './Flag'
  * branch pode ter regra de preço diferente. Perguntar só no checkout faria o
  * cliente montar o pedido inteiro vendo um preço que não é o dele.
  */
-export default function WhereConsumePrompt({ onDone }: { onDone: () => void }) {
+export default function WhereConsumePrompt({
+  onDone,
+  allowed,
+}: {
+  onDone: () => void
+  allowed: WhereConsume[]
+}) {
   const { setWhereConsume } = useCartStore()
   const { lang, available, setLang, t } = useLangStore()
 
@@ -74,7 +80,7 @@ export default function WhereConsumePrompt({ onDone }: { onDone: () => void }) {
       </div>
 
       <div className="w-full max-w-sm flex flex-col gap-3">
-        {OPTIONS.map((o) => (
+        {OPTIONS.filter((option) => allowed.includes(option.value)).map((o) => (
           <button
             key={o.value}
             onClick={() => choose(o.value)}

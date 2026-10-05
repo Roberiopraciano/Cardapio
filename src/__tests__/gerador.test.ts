@@ -44,11 +44,18 @@ describe('gerarHibridoTempoAleatorio', () => {
 })
 
 describe('gerarCodigoAlfaNumerico', () => {
-  it('retorna 4 caracteres: 1 letra + 3 dígitos', () => {
+  it('retorna exatamente 5 caracteres alfanuméricos', () => {
     const code = gerarCodigoAlfaNumerico()
-    expect(code).toHaveLength(4)
-    expect(code[0]).toMatch(/[A-Z]/)
-    expect(code.slice(1)).toMatch(/[0-9]{3}/)
+    expect(code).toHaveLength(5)
+    expect(code).toMatch(/^[A-HJ-NP-Z2-9]{5}$/)
+  })
+
+  it('sempre contém pelo menos uma letra e um número', () => {
+    for (let i = 0; i < 200; i++) {
+      const code = gerarCodigoAlfaNumerico()
+      expect(code).toMatch(/[A-HJ-NP-Z]/)
+      expect(code).toMatch(/[2-9]/)
+    }
   })
 
   it('gera múltiplos códigos sem repetição sistemática', () => {
@@ -61,21 +68,13 @@ describe('gerarCodigoAlfaNumerico', () => {
   // `1` e `0`, e o cliente vai ao balcão com a senha errada.
   it('nunca usa as letras I e O', () => {
     for (let i = 0; i < 400; i++) {
-      expect(gerarCodigoAlfaNumerico()[0]).not.toMatch(/[IO]/)
+      expect(gerarCodigoAlfaNumerico()).not.toMatch(/[IO]/)
     }
   })
 
-  it('aceita 4 dígitos → 5 caracteres', () => {
-    const code = gerarCodigoAlfaNumerico(4)
-    expect(code).toHaveLength(5)
-    expect(code[0]).toMatch(/[A-HJ-NP-Z]/)
-    expect(code.slice(1)).toMatch(/^[0-9]{4}$/)
-  })
-
-  it('sempre preenche com zero à esquerda', () => {
+  it('nunca usa os números 0 e 1', () => {
     for (let i = 0; i < 200; i++) {
-      expect(gerarCodigoAlfaNumerico(3)).toHaveLength(4)
-      expect(gerarCodigoAlfaNumerico(4)).toHaveLength(5)
+      expect(gerarCodigoAlfaNumerico()).not.toMatch(/[01]/)
     }
   })
 })
@@ -114,20 +113,12 @@ describe('gerarConsumptionCode', () => {
     expect(gerarConsumptionCode('mesa', '')).toBe('MESA')
   })
 
-  // Formato de painel de senha: 1 letra + N dígitos, para ser chamado em voz
-  // alta. Antes era "3K4M" (híbrido embaralhado), que não se soletra bem.
-  it('modo balcao → senha letra+3 dígitos (ex: A042)', () => {
+  it('modo balcao → senha de 5 caracteres com letras e números', () => {
     const code = gerarConsumptionCode('balcao', '')
-    expect(code).toHaveLength(4)
-    expect(code).toMatch(/^[A-HJ-NP-Z][0-9]{3}$/)
-  })
-
-  it('modo balcao com 4 dígitos', () => {
-    expect(gerarConsumptionCode('balcao', '', 4)).toMatch(/^[A-HJ-NP-Z][0-9]{4}$/)
-  })
-
-  it('modo mesa ignora os dígitos', () => {
-    expect(gerarConsumptionCode('mesa', 'MESA_07', 4)).toBe('MESA_07')
+    expect(code).toHaveLength(5)
+    expect(code).toMatch(/^[A-HJ-NP-Z2-9]{5}$/)
+    expect(code).toMatch(/[A-HJ-NP-Z]/)
+    expect(code).toMatch(/[2-9]/)
   })
 
   it('modo balcao → código diferente do nome da mesa', () => {

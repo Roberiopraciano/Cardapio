@@ -102,7 +102,7 @@ describe('paymentBadge', () => {
     expect(b?.detail).toContain('não confirmado no app')
   })
 
-  it('totem informa a contra-senha e segue não confirmado', () => {
+  it('totem informa a senha e segue não confirmado', () => {
     const b = paymentBadge({ via: 'totem', handoffCode: 'T-4827' })
     expect(b?.tone).toBe('unknown')
     expect(b?.detail).toContain('T-4827')

@@ -244,6 +244,17 @@ export function calcCartTotal(items: CartItem[]): number {
   return items.reduce((acc, i) => acc + calcCartItemSubtotal(i), 0)
 }
 
+/** Valor das embalagens automáticas para viagem, já considerando quantidades. */
+export function calcPackagingTotal(items: CartItem[]): number {
+  return items.reduce((cartTotal, item) => {
+    const itemPackaging = item.addedComplements
+      .filter((complement) => complement.isPackaging === true)
+      .reduce((total, complement) => total + complementPrice(complement), 0)
+
+    return cartTotal + (itemPackaging * item.quantity)
+  }, 0)
+}
+
 /** tmProduto = total / Σ(peopleCount × qty) — espelho de _calcularTmProduto() */
 export function calcTmProduto(items: CartItem[], total: number): number {
   const people = items.reduce((acc, i) => acc + (i.product.peopleCount || 0) * i.quantity, 0)

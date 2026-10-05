@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useCartStore } from '../store/cartStore'
 import {
   formatCurrency, calcCartItemSubtotal, getComplementPriceLabel, getFractionText,
-  complementPrice,
+  complementPrice, calcPackagingTotal,
 } from '../lib/pricing'
 import ImageWithFallback from './ImageWithFallback'
 import Icon from './Icon'
@@ -194,6 +194,7 @@ export default function CartDrawer({ open, onClose }: Props) {
 
   const subtotal = total()
   const totalFinal = totalWithCoupon()
+  const packagingTotal = calcPackagingTotal(items)
   const hasCoupon = appliedCoupon !== null
 
   return (
@@ -255,6 +256,12 @@ export default function CartDrawer({ open, onClose }: Props) {
                 </div>
               </>
             )}
+            {packagingTotal > 0 && (
+              <div className="flex justify-between text-sm mb-1">
+                <span style={{ color: 'var(--text-lo)' }}>Embalagem (incluída no total)</span>
+                <span style={{ color: 'var(--text-lo)' }}>{formatCurrency(packagingTotal)}</span>
+              </div>
+            )}
             <div className="flex justify-between items-center mb-3">
               <span className="font-semibold" style={{ color: 'var(--text-hi)' }}>Total</span>
               <span className="text-xl font-bold" style={{ color: 'var(--text-hi)' }}>
@@ -287,6 +294,7 @@ function CartItemRow({
   const groupRows = groupComplements(item)
   const hasComplements = groupRows.some(g => !g.isPackaging && g.items.length > 0)
   const hasPackaging = groupRows.some(g => g.isPackaging)
+  const packagingTotal = calcPackagingTotal([item])
   const price = calcCartItemSubtotal(item)
 
   return (
@@ -366,7 +374,7 @@ function CartItemRow({
         <div className="mt-2 flex items-center gap-1.5">
           <span className="text-[10px]">📦</span>
           <span className="text-xs" style={{ color: 'var(--color-brand)' }}>
-            Embalagem p/ levar incluída
+            Embalagem p/ levar · {formatCurrency(packagingTotal)}
           </span>
         </div>
       )}

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useCartStore } from '../store/cartStore'
 import { useAppStore } from '../store/appStore'
 import { api, OrderError } from '../api/client'
-import { formatCurrency, calcCartItemSubtotal, calcTmProduto } from '../lib/pricing'
+import { formatCurrency, calcCartItemSubtotal, calcPackagingTotal, calcTmProduto } from '../lib/pricing'
 import { findCouponByCode } from '../lib/stock'
 import { checkBranchOpen } from '../lib/businessPeriod'
 import ImageWithFallback from '../components/ImageWithFallback'
@@ -16,6 +16,10 @@ import { toast } from '../store/toastStore'
 import GoogleSignInButton from '../components/GoogleSignInButton'
 import ConfirmModal from '../components/ConfirmModal'
 import { Analytics } from '../lib/analytics'
+import { saveTotemHandoff } from '../lib/totemHandoff'
+import { buildOrderPayload } from '../lib/orderPayload'
+import { allowedWhereConsume } from '../lib/whereConsume'
+import { readOrderTrackingConfig } from '../lib/orderTracking'
 
 export default function Checkout() {
   const navigate = useNavigate()
@@ -32,8 +36,21 @@ export default function Checkout() {
   const [error, setError] = useState<string | null>(null)
   const [couponInput, setCouponInput] = useState(couponCode)
   const [couponError, setCouponError] = useState<string | null>(null)
+  const [couponLoading, setCouponLoading] = useState(false)
   const [confirmModality, setConfirmModality] = useState(false)
   const mode = params?.mode ?? 'mesa'
+  const packagingTotal = calcPackagingTotal(items)
+
+  /**
+   * Com `totemPaymentEnabled`, o totem é a **única** forma de pagamento: o
+   * pedido vira QR Code e só vai para a cozinha depois de pago lá. Sem a
+   * chave, segue o fluxo de antes (pedido direto, pagamento na mesa/balcão).
+   */
+  const cardapioHandoffEnabled = branch?.settingsTotem?.['cardapioHandoffEnabled']
+  const consumptionOptions = allowedWhereConsume(branch?.settingsTotem)
+  const viaTotem = typeof cardapioHandoffEnabled === 'boolean'
+    ? cardapioHandoffEnabled
+    : branch?.settingsWeb?.totemPaymentEnabled === true
 
   // Comanda por cliente dentro da mesa — só quando a branch liga a opção
   const comandaEnabled = mode === 'mesa' && branch?.settingsWeb?.comandaEnabled === true
@@ -41,12 +58,16 @@ export default function Checkout() {
   const comandaRequired = branch?.settingsWeb?.comandaRequired === true
 
   /**
-   * Cupom vem desligado por padrão: a maioria das branches não usa, e um campo
-   * que sempre responde "cupom inválido" é pior que campo nenhum.
-   * Ligar em `settingsWeb.couponsEnabled`. A lógica de aplicação
-   * (findCouponByCode / totalWithCoupon) já está inteira e testada.
+   * O cadastro da campanha é o interruptor do recurso: se a API entregou pelo
+   * menos uma oferta ativa com código, o checkout aceita cupons. Isso elimina a
+   * segunda configuração que deixava campanhas cadastradas invisíveis no menu.
    */
-  const COUPONS_ENABLED = branch?.settingsWeb?.couponsEnabled === true
+  const availableCoupons = offers.filter((offer) => {
+    const coupon = offer.triggers?.['coupon'] as Record<string, unknown> | undefined
+    return typeof coupon?.['code'] === 'string' && coupon['code'].trim() !== ''
+  })
+  const branchAllowsCoupons = branch?.settingsWeb?.couponsEnabled === true
+  const COUPONS_ENABLED = branchAllowsCoupons && availableCoupons.length > 0
 
   /** E-mail é opt-in por branch: quem não usa não deve pedir dado que não vai
    *  tratar — coletar sem finalidade é justamente o que a LGPD veda. */
@@ -95,6 +116,15 @@ export default function Checkout() {
     Analytics.beginCheckout(items, finalTotal)
   }, [])
 
+  // A cotação pertence ao carrinho que foi validado. Se quantidade ou itens
+  // mudarem, remove o desconto antigo e exige uma nova validação na API.
+  useEffect(() => {
+    if (!appliedCoupon) return
+    if (appliedCoupon.validatedSubtotal === subtotal) return
+    setCoupon(null, couponCode)
+    setCouponError('O carrinho mudou. Aplique o cupom novamente para recalcular o desconto.')
+  }, [subtotal])
+
   if (isEmpty) return null
 
   /**
@@ -115,15 +145,53 @@ export default function Checkout() {
     navigate('/', { replace: true })
   }
 
-  const handleApplyCoupon = () => {
+  const handleApplyCoupon = async () => {
     if (!COUPONS_ENABLED) return
+    if (appliedCoupon) {
+      setCoupon(null, '')
+      setCouponInput('')
+      setCouponError(null)
+      return
+    }
     setCouponError(null)
     if (!couponInput.trim()) { setCoupon(null, ''); return }
-    const found = findCouponByCode(offers, couponInput)
+    const found = findCouponByCode(availableCoupons, couponInput)
     if (!found) { setCouponError('Cupom inválido ou não encontrado.'); return }
-    setCoupon(found, couponInput)
-    setCouponError(null)
-    Analytics.applyCoupon(couponInput, subtotal)
+
+    setCouponLoading(true)
+    try {
+      const validation = await api.validateCoupon({
+        code: couponInput.trim(),
+        branch: params?.branchId ?? '',
+        subtotal,
+        locationType: 8,
+        customer: clientCpf.replace(/\D/g, '') || clientPhone.replace(/\D/g, '') || undefined,
+        items: items.map((item) => ({
+          product: item.product._id,
+          price: item.product.price,
+          quantity: item.quantity,
+          amount: calcCartItemSubtotal(item),
+          complements: item.addedComplements,
+        })),
+      })
+      if (!validation.valid) {
+        setCoupon(null, '')
+        setCouponError(validation.message || 'Cupom inválido para este pedido.')
+        return
+      }
+
+      setCoupon({
+        ...found,
+        validatedDiscount: validation.discount,
+        validatedSubtotal: subtotal,
+      }, couponInput.trim())
+      setCouponError(null)
+      Analytics.applyCoupon(couponInput, subtotal)
+    } catch {
+      setCouponError('Não foi possível validar o cupom. Tente novamente.')
+    } finally {
+      setCouponLoading(false)
+    }
   }
 
   const handleSubmit = async () => {
@@ -151,15 +219,9 @@ export default function Checkout() {
       setError(`Informe o número da sua ${comandaLabel.toLowerCase()}.`)
       return
     }
-    // Sem simpleAuth o Laravel vai recusar. Avisar aqui, em vez de deixar o
-    // cliente descobrir por um 401 genérico, aponta o problema para o lado certo.
+    // Vazio hoje em todas as branches: `buildOrderPayload` manda um marcador
+    // no lugar, senão o validador do Laravel recusa o pedido (422)
     const simpleAuth = branch?.settingsWeb?.simpleAuth ?? ''
-    if (!simpleAuth) {
-      console.error(
-        '[pedido] branch.settingsWeb.simpleAuth está vazio — o backend vai ' +
-        'recusar. Ver BACKEND.md §1.',
-      )
-    }
 
     setLoading(true); setError(null)
 
@@ -210,45 +272,70 @@ export default function Checkout() {
     }
 
     try {
-      const payload = {
-        branch: params?.branchId ?? '',
+      const payload = buildOrderPayload({
+        branchId: params?.branchId ?? '',
         simpleAuth,
         consumptioncode, consumptionint,
-        locationType: 8,
-        amount: finalTotal, subtotal, total: finalTotal,
-        totemClientName: clientName,
-        phone: clientPhone,
-        // Só dígitos no payload — o backend não deve receber máscara
-        cpfCustomer: clientCpf.replace(/\D/g, '') || undefined,
-        ...(askEmail && clientEmail.trim() ? { email: clientEmail.trim() } : {}),
+        items, subtotal, total: finalTotal,
+        client: { name: clientName, phone: clientPhone, cpf: clientCpf, email: clientEmail },
+        askEmail,
         // Só vai no payload quando a branch usa comanda e o cliente informou
-        ...(comandaEnabled && comanda.trim() ? { comanda: comanda.trim() } : {}),
-        note: orderNote || undefined,
-        paymentMethod: {
-          type: mode === 'balcao' ? 'counter' : 'table',
-          kind: 'Cardápio',
-          label: mode === 'balcao' ? 'Pagar no balcão' : 'Pagar na mesa',
-        },
-        additionalInfo: {
-          modality: whereConsume === 'OnLocal' ? 'Consumir no local' : 'Para levar',
-          whereConsume,
-        },
-        origin: 'cardapio',
-        ...(tmProduto > 0 ? { tmProduto } : {}),
-        ...(appliedCoupon ? { coupon: {
-          _id: appliedCoupon._id, title: appliedCoupon.title,
-          triggers: appliedCoupon.triggers, rules: appliedCoupon.rules, rewards: appliedCoupon.rewards,
-        }} : {}),
-        items: items.map((item) => ({
-          product: item.product._id,
-          name: item.product.name,
-          originalPrice: item.product.price ?? 0,
-          amount: calcCartItemSubtotal(item),
-          price: item.product.price ?? 0,
-          quantity: item.quantity,
-          note: item.note ?? '',
-          complements: buildComplements(item.addedComplements),
-        })),
+        comanda: comandaEnabled ? comanda : undefined,
+        note: orderNote,
+        mode, whereConsume,
+        payVia: viaTotem ? 'totem' : 'local',
+        tmProduto,
+        coupon: appliedCoupon,
+      })
+
+      const historyItems = items.map((item) => ({
+        name: item.product.name,
+        quantity: item.quantity,
+        amount: calcCartItemSubtotal(item),
+        extras: item.addedComplements
+          .filter((c) => !c.isPackaging)
+          .map((c) => {
+            const total = c.quantity * item.quantity
+            return total > 1 ? `${total}× ${c.name}` : c.name
+          }),
+      }))
+
+      if (viaTotem) {
+        // Pré-pedido, não pedido: não vai para a cozinha até o totem cobrar
+        const handoff = await api.postTotemHandoff(payload)
+        const confirmedConsumptionCode = handoff.consumptioncode || handoff.code
+
+        const orderTracking = readOrderTrackingConfig(branch?.settingsTotem)
+        saveTotemHandoff({
+          handoff,
+          branchId: params?.branchId ?? '',
+          consumptioncode: confirmedConsumptionCode,
+          orderTrackingUrlTemplate: orderTracking.urlTemplate,
+          trackingBranchIdDesk: orderTracking.branchIdDesk,
+          trackingCompanyIdDesk: orderTracking.companyIdDesk,
+          orderTrackingEnabled: orderTracking.enabled,
+          total: handoff.total ?? finalTotal,
+          items,
+        })
+        pushOrderHistory({
+          at: new Date().toISOString(),
+          branchId: params?.branchId ?? '',
+          branchName: branch?.name,
+          mode,
+          table: params?.table,
+          consumptioncode: confirmedConsumptionCode,
+          consumptionint,
+          comanda: comandaEnabled && comanda.trim() ? comanda.trim() : undefined,
+          total: handoff.total ?? finalTotal,
+          orderId: handoff.id,
+          // Sem `status`: enviar ao totem não é pagar
+          payment: { via: 'totem', handoffCode: handoff.code },
+          items: historyItems,
+        })
+
+        clearCart()
+        navigate('/totem', { replace: true })
+        return
       }
 
       const result = await api.postOrder(payload)
@@ -265,19 +352,9 @@ export default function Checkout() {
         consumptioncode,
         consumptionint,
         comanda: comandaEnabled && comanda.trim() ? comanda.trim() : undefined,
-        total: finalTotal,
+        total: typeof result?.total === 'number' ? result.total : finalTotal,
         orderId: (result as { _id?: string } | null)?._id,
-        items: items.map((item) => ({
-          name: item.product.name,
-          quantity: item.quantity,
-          amount: calcCartItemSubtotal(item),
-          extras: item.addedComplements
-            .filter((c) => !c.isPackaging)
-            .map((c) => {
-              const total = c.quantity * item.quantity
-              return total > 1 ? `${total}× ${c.name}` : c.name
-            }),
-        })),
+        items: historyItems,
       })
 
       clearCart()
@@ -335,7 +412,9 @@ export default function Checkout() {
                   </p>
                 )}
                 {item.addedComplements.some(c=>c.isPackaging) && (
-                  <p className="text-xs mt-0.5 text-emerald-600">+ Embalagem p/ levar</p>
+                  <p className="text-xs mt-0.5 text-emerald-600">
+                    + Embalagem p/ levar · {formatCurrency(calcPackagingTotal([item]))}
+                  </p>
                 )}
                 {item.note && <p className="text-xs mt-0.5 text-amber-600">Obs: {item.note}</p>}
                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-lo)' }}>{item.quantity}×</p>
@@ -369,36 +448,40 @@ export default function Checkout() {
               {whereConsume === 'OnLocal' ? 'Comer aqui' : 'Para levar'}
             </p>
           </div>
-          <button
-            onClick={handleChangeModality}
-            className="text-xs font-semibold px-3 py-2 rounded-lg border flex-shrink-0"
-            style={{ borderColor: 'var(--border)', color: 'var(--color-brand)' }}
-          >
-            Trocar
-          </button>
+          {consumptionOptions.length > 1 && (
+            <button
+              onClick={handleChangeModality}
+              className="text-xs font-semibold px-3 py-2 rounded-lg border flex-shrink-0"
+              style={{ borderColor: 'var(--border)', color: 'var(--color-brand)' }}
+            >
+              Trocar
+            </button>
+          )}
         </div>
 
-        {/* Cupom — controlado por settingsWeb.couponsEnabled */}
+        {/* Cupom — exige permissão da unidade e ao menos uma campanha ativa */}
         <div className="rounded-2xl p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)', opacity: COUPONS_ENABLED ? 1 : 0.55 }}>
           <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-hi)' }}>Cupom de desconto</p>
           <div className="flex gap-2">
             <input type="text"
               placeholder={COUPONS_ENABLED ? 'Código do cupom' : 'Indisponível no momento'}
-              disabled={!COUPONS_ENABLED}
+              disabled={!COUPONS_ENABLED || couponLoading}
               value={couponInput} onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(null) }}
               onKeyDown={(e) => e.key === 'Enter' && handleApplyCoupon()}
               className="flex-1 text-sm rounded-xl px-3 py-2.5 outline-none uppercase disabled:cursor-not-allowed"
               style={{ background: 'var(--bg-input)', color: 'var(--text-hi)', border: '1px solid var(--border)' }} />
             <button onClick={handleApplyCoupon}
-              disabled={!COUPONS_ENABLED}
+              disabled={!COUPONS_ENABLED || couponLoading}
               className="px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:cursor-not-allowed"
               style={{ backgroundColor: !COUPONS_ENABLED ? 'var(--text-lo)' : appliedCoupon ? '#6b7280' : 'var(--color-brand)' }}>
-              {appliedCoupon ? 'Remover' : 'Aplicar'}
+              {couponLoading ? 'Validando…' : appliedCoupon ? 'Remover' : 'Aplicar'}
             </button>
           </div>
           {!COUPONS_ENABLED && (
             <p className="text-xs mt-1.5" style={{ color: 'var(--text-lo)' }}>
-              Cupons ainda não estão disponíveis neste cardápio.
+              {branchAllowsCoupons
+                ? 'Nenhum cupom ativo está disponível nesta unidade.'
+                : 'Cupons estão desativados para esta unidade.'}
             </p>
           )}
           {COUPONS_ENABLED && couponError && <p className="text-xs text-red-500 mt-1.5">{couponError}</p>}
@@ -501,6 +584,25 @@ export default function Checkout() {
           )}
         </div>
 
+        {/* Pagamento — informativo: com o totem ligado, é a única opção */}
+        {viaTotem && (
+          <div className="rounded-2xl p-4 border flex items-start gap-3"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--color-brand)' }}>
+            <span className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'var(--color-brand)' }}>
+              <Icon name="qrcode" size={16} color="#fff" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs" style={{ color: 'var(--text-lo)' }}>Pagamento</p>
+              <p className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>Pagar no totem</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-lo)' }}>
+                Vamos gerar um QR Code: mostre no totem e pague por lá. O pedido só
+                vai para a cozinha depois do pagamento.
+              </p>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="p-3 rounded-xl" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
             <p className="text-sm text-red-700">{error}</p>
@@ -528,6 +630,12 @@ export default function Checkout() {
             <span>−{formatCurrency(subtotal - finalTotal)}</span>
           </div>
         )}
+        {packagingTotal > 0 && (
+          <div className="flex justify-between text-sm mb-1">
+            <span style={{ color: 'var(--text-lo)' }}>Embalagem (incluída no total)</span>
+            <span style={{ color: 'var(--text-lo)' }}>{formatCurrency(packagingTotal)}</span>
+          </div>
+        )}
         <div className="flex justify-between items-center mb-2.5">
           <span className="font-semibold" style={{ color: 'var(--text-hi)' }}>Total</span>
           <span className="text-lg font-bold" style={{ color: 'var(--text-hi)' }}>{formatCurrency(finalTotal)}</span>
@@ -535,7 +643,10 @@ export default function Checkout() {
         <button onClick={handleSubmit} disabled={loading}
           className="w-full py-4 rounded-xl text-white font-semibold text-base disabled:opacity-60 active:scale-[0.98] transition-transform"
           style={{ backgroundColor: 'var(--color-brand)' }}>
-          {loading ? 'Enviando...' : mode === 'balcao' ? 'Fazer pedido no balcão' : 'Fazer pedido na mesa'}
+          {loading
+            ? (viaTotem ? 'Gerando QR Code...' : 'Enviando...')
+            : viaTotem ? 'Gerar QR Code para o totem'
+            : mode === 'balcao' ? 'Fazer pedido no balcão' : 'Fazer pedido na mesa'}
         </button>
       </div>
 
@@ -551,16 +662,4 @@ export default function Checkout() {
       />
     </div>
   )
-}
-
-function buildComplements(c: import('../types').CartComplement[]): import('../types').OrderComplementGroup[] {
-  const groups = new Map<string, import('../types').OrderComplementGroup>()
-  for (const comp of c) {
-    if (!groups.has(comp.groupId)) groups.set(comp.groupId, { _id: comp.groupId, name: comp.groupName, items: [] })
-    const g = groups.get(comp.groupId)!
-    const ex = g.items.find(i => i._id === comp._id)
-    if (ex) ex.quantity += comp.quantity
-    else g.items.push({ _id: comp._id, name: comp.name, price: comp.price, quantity: comp.quantity, unitFraction: comp.unitFraction })
-  }
-  return [...groups.values()]
 }

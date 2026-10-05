@@ -45,7 +45,7 @@ export type PaymentTone = 'paid' | 'unknown' | 'failed' | 'pending'
 export interface PaymentBadge {
   tone: PaymentTone
   label: string
-  /** Linha de apoio: método, troco, contra-senha. */
+  /** Linha de apoio: método, troco, senha. */
   detail?: string
 }
 
@@ -90,7 +90,7 @@ export function paymentBadge(p: HistoryPayment | undefined): PaymentBadge | null
 
   // Pagamento por fora: dizer o que sabemos (para onde foi) e o que não sabemos
   const detail: string[] = []
-  if (p.handoffCode) detail.push(`Contra-senha ${p.handoffCode}`)
+  if (p.handoffCode) detail.push(`Senha ${p.handoffCode}`)
   if (method) detail.push(method)
   if (p.via === 'on_delivery' && typeof p.changeFor === 'number' && p.changeFor > 0) {
     detail.push(`troco para ${p.changeFor.toFixed(2).replace('.', ',')}`)

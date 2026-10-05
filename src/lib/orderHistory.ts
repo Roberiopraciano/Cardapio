@@ -33,7 +33,7 @@ export interface HistoryItem {
 export type PaymentVia =
   | 'app'          // gateway no próprio celular
   | 'pos'          // cobrança empurrada para maquininha
-  | 'totem'        // contra-senha, pago no TEF do totem
+  | 'totem'        // senha do pedido, pago no TEF do totem
   | 'counter'      // caixa / balcão
   | 'waiter'       // com o garçom, no fechamento da mesa
   | 'on_delivery'  // na entrega
@@ -51,7 +51,7 @@ export interface HistoryPayment {
   method?: PaymentMethod
   /** ISO da confirmação — só quando `status: 'paid'`. */
   paidAt?: string
-  /** Contra-senha, quando o pedido foi entregue ao totem ou ao balcão. */
+  /** Senha do pedido, quando ele foi entregue ao totem ou ao balcão. */
   handoffCode?: string
   /** Troco pedido, em pagamento na entrega em dinheiro. */
   changeFor?: number

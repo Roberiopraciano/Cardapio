@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import { useCartStore } from '../store/cartStore'
-import { api, countsToBill } from '../api/client'
+import { api, countsToBill, complementEntries } from '../api/client'
 import type { TableOrder, TableOrderItem, TableSessionInfo } from '../api/client'
 import { formatCurrency } from '../lib/pricing'
 import { formatQuantity, formatUnitPrice, roundQty } from '../lib/billFormat'
@@ -83,8 +83,7 @@ function itemDiscount(i: TableOrderItem): number {
  * de fato idêntico e nada além disso.
  */
 function itemSignature(i: TableOrderItem): string {
-  const extras = (i.complements ?? [])
-    .flatMap((g) => g.items ?? [])
+  const extras = complementEntries(i)
     .map((c) => `${c.name}×${c.quantity ?? 1}`)
     .sort()
     .join('|')
@@ -121,8 +120,7 @@ function summarize(orders: TableOrder[]): SummaryLine[] {
   for (const o of orders) {
     for (const item of (o.items ?? []).filter(countsToBill)) {
       const key = itemSignature(item)
-      const extras = (item.complements ?? [])
-        .flatMap((g) => g.items ?? [])
+      const extras = complementEntries(item)
         .map((c) => (c.quantity && c.quantity > 1 ? `${c.quantity}× ${c.name}` : c.name))
         .filter(Boolean) as string[]
 
@@ -642,8 +640,7 @@ export default function TableBill() {
 
               <div className="divide-y" style={{ borderColor: 'var(--divider)' }}>
                 {(order.items ?? []).map((item, idx) => {
-                  const extras = (item.complements ?? [])
-                    .flatMap((g) => g.items ?? [])
+                  const extras = complementEntries(item)
                     .map((c) => (c.quantity && c.quantity > 1 ? `${c.quantity}× ${c.name}` : c.name))
                     .filter(Boolean)
                   // Pedido cancelado risca todos os itens dele, mesmo os que não

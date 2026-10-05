@@ -48,6 +48,9 @@ const FAKE: SettingsWeb = {
   menuShortName: 'Bebelu',
   menuDescription: 'Peça pelo celular, na mesa ou no balcão',
 
+  // Opção "Pagar no totem" no checkout
+  totemPaymentEnabled: true,
+
   // Comanda por cliente dentro da mesa
   comandaEnabled: true,
   comandaLabel: 'Comanda',

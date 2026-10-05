@@ -90,6 +90,10 @@ export interface Offer {
   disabled: boolean
   period?: Record<string, unknown>
   match?: string
+  /** Desconto cotado pela API para o carrinho atual (nunca é autoridade final). */
+  validatedDiscount?: number
+  /** Subtotal usado na cotação; qualquer mudança exige nova validação. */
+  validatedSubtotal?: number
 }
 
 /** Status calculado para exibição no card */
@@ -156,6 +160,8 @@ export interface BranchBanner {
 
 export interface Branch {
   _id: string
+  /** Campo legado derivado do Mongo; não usar no acompanhamento de pedidos. */
+  guidBranch?: string
   name: string
   phone: string
   settingsTotem: Record<string, unknown>
@@ -209,7 +215,7 @@ export interface Branch {
      */
     allowedModes?: Array<'mesa' | 'balcao'>
 
-    /** Campo de cupom no checkout. Padrão: desligado. */
+    /** Libera o uso de cupons nesta unidade. Ausente ou false mantém desativado. */
     couponsEnabled?: boolean
 
     /**
@@ -246,12 +252,15 @@ export interface Branch {
     privacyPolicyUrl?: string
     /** E-mail do encarregado de dados, para pedidos de exclusão (LGPD art. 18). */
     privacyContactEmail?: string
-    /**
-     * Dígitos da senha do balcão (`A042` = 3 · `K1725` = 4). Padrão: 3.
-     * Mais dígitos = menos chance de duas pessoas receberem a mesma senha
-     * no mesmo serviço. Ver `lib/gerador_codigo.ts`.
-     */
+    /** @deprecated A senha do balcão agora possui sempre 5 caracteres alfanuméricos. */
     passwordDigits?: number
+
+    /**
+     * Opção de pagamento "Pagar no totem" no checkout. Padrão: desligado —
+     * oferecer o totem numa loja sem totem manda o cliente procurar uma
+     * máquina que não existe. Ver `pages/TotemHandoff.tsx`.
+     */
+    totemPaymentEnabled?: boolean
 
     /**
      * Validade do carrinho em minutos. Padrão: 240 (4h).

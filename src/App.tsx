@@ -12,6 +12,7 @@ import { Analytics } from './lib/analytics'
 import { branchLanguages } from './lib/i18n'
 import { applyMockSettings } from './lib/mockSettings'
 import { applyMenuIdentity, readMenuIdentity } from './lib/pwaIdentity'
+import { allowedWhereConsume } from './lib/whereConsume'
 import { useLangStore } from './store/langStore'
 import { initAnalyticsIfConsented } from './components/ConsentBanner'
 import ClosedScreen from './components/ClosedScreen'
@@ -28,6 +29,7 @@ import Home from './pages/Home'
 import ProductDetail from './pages/ProductDetail'
 import Checkout from './pages/Checkout'
 import Confirmation from './pages/Confirmation'
+import TotemHandoffPage from './pages/TotemHandoff'
 import TableBill from './pages/TableBill'
 import Profile from './pages/Profile'
 import OrderHistory from './pages/OrderHistory'
@@ -106,6 +108,18 @@ function Boot() {
         const branchObj = rawBranch as unknown as import('./types').Branch
         // Recursos que o backend ainda não devolve — ver src/lib/mockSettings.ts
         branchObj.settingsWeb = applyMockSettings(branchObj.settingsWeb)
+
+        // A mesma configuração alimenta Totem e Cardápio. Se houver apenas
+        // uma modalidade, aplica direto e não obriga o cliente a confirmar
+        // uma escolha que a unidade não oferece.
+        const consumptionOptions = allowedWhereConsume(branchObj.settingsTotem)
+        const cart = useCartStore.getState()
+        if (!consumptionOptions.includes(cart.whereConsume)) {
+          cart.setWhereConsume(consumptionOptions[0])
+        }
+        if (consumptionOptions.length === 1) {
+          cart.setWhereConsumeAsked(true)
+        }
 
         // Carrinho vencido é descartado agora, com o prazo da branch já em mão.
         // `sessionStorage` só morre quando a aba fecha, e aba de celular fica
@@ -218,8 +232,12 @@ function Boot() {
   // A escolha local/viagem muda preço e embalagem, então vem antes do cardápio.
   // A branch pode desligar com settingsWeb.askWhereConsume = false.
   const askWhereConsume = branch?.settingsWeb?.askWhereConsume !== false
-  if (askWhereConsume && !whereConsumeAsked) {
-    return <WhereConsumePrompt onDone={() => setWhereConsumeAsked(true)} />
+  const consumptionOptions = allowedWhereConsume(branch?.settingsTotem)
+  if (askWhereConsume && consumptionOptions.length > 1 && !whereConsumeAsked) {
+    return <WhereConsumePrompt
+      allowed={consumptionOptions}
+      onDone={() => setWhereConsumeAsked(true)}
+    />
   }
 
   return (
@@ -229,6 +247,7 @@ function Boot() {
         <Route path="/produto/:id" element={<ProductDetail />} />
         <Route path="/checkout" element={<Checkout />} />
         <Route path="/confirmacao" element={<Confirmation />} />
+        <Route path="/totem" element={<TotemHandoffPage />} />
         <Route path="/conta" element={<TableBill />} />
         <Route path="/perfil" element={<Profile />} />
         <Route path="/pedidos" element={<OrderHistory />} />
