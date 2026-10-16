@@ -1,19 +1,15 @@
-import { describe, expect, it } from 'vitest'
-import { allowedWhereConsume } from '../lib/whereConsume'
+import { describe, it, expect } from 'vitest'
+import { whereConsumeForMode } from '../lib/whereConsume'
 
-describe('allowedWhereConsume', () => {
-  it('mantém as duas opções para unidades legadas', () => {
-    expect(allowedWhereConsume(undefined)).toEqual(['OnLocal', 'OutsideLocal'])
+describe('whereConsumeForMode', () => {
+  it('mesa só serve no local, mesmo que o cadastro permita levar', () => {
+    expect(whereConsumeForMode('mesa', { allowedWhereConsume: ['OnLocal', 'OutsideLocal'] })).toEqual(['OnLocal'])
   })
 
-  it('aceita somente as opções válidas e remove duplicadas', () => {
-    expect(allowedWhereConsume({
-      allowedWhereConsume: ['OutsideLocal', 'invalid', 'OutsideLocal'],
-    })).toEqual(['OutsideLocal'])
-  })
-
-  it('não deixa configuração malformada remover todas as opções', () => {
-    expect(allowedWhereConsume({ allowedWhereConsume: [] }))
-      .toEqual(['OnLocal', 'OutsideLocal'])
+  it('balcão e delivery seguem o cadastro', () => {
+    const cfg = { allowedWhereConsume: ['OnLocal', 'OutsideLocal'] }
+    expect(whereConsumeForMode('balcao', cfg)).toEqual(['OnLocal', 'OutsideLocal'])
+    expect(whereConsumeForMode('delivery', cfg)).toEqual(['OnLocal', 'OutsideLocal'])
+    expect(whereConsumeForMode('balcao', { allowedWhereConsume: ['OutsideLocal'] })).toEqual(['OutsideLocal'])
   })
 })

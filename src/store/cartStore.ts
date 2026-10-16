@@ -49,7 +49,7 @@ interface CartStore {
   setClientCpf: (c: string) => void
   loadSavedClient: () => void
   /** Inicializa a identificação da mesa ou a senha alfanumérica do balcão. */
-  initCodes: (mode: 'mesa' | 'balcao', table: string) => void
+  initCodes: (mode: 'mesa' | 'balcao' | 'delivery', table: string) => void
   total: () => number
   totalWithCoupon: () => number
   itemCount: () => number

@@ -1,5 +1,7 @@
 // Espelho de rest.dart — todas as chamadas públicas (sem Bearer token)
 
+import type { Offer } from '../types'
+
 const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? ''
 
 if (!BASE_URL) {
@@ -281,6 +283,15 @@ export interface TotemHandoff {
 export type TotemHandoffStatus = 'pending' | 'consumed' | 'cancelled' | 'expired'
 
 export const api = {
+  /** Número cadastrado da mesa, pelo código do QR Code. `null` = mesa sem número. */
+  getTableNumber: async (branchId: string, code: string): Promise<number | null> => {
+    const res = await request<{ data: Array<{ number?: number | null }> }>(
+      `api/tables/lookup?branch=${branchId}&code=${encodeURIComponent(code)}`,
+    )
+    const n = res.data?.[0]?.number
+    return typeof n === 'number' ? n : null
+  },
+
   getBranch: (id: string) =>
     request<{ data: unknown[] }>(`api/branches?_id=${id}`),
 
@@ -321,6 +332,7 @@ export const api = {
     total?: number
     appliesTo?: string[]
     stackableWithCashback?: boolean
+    offer?: Offer | null
   }> => {
     const path = 'api/coupons/validate'
     let res: Response

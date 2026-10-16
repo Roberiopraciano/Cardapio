@@ -78,6 +78,10 @@ const PT: Dict = {
   'where.eatHereHint': 'Servimos na mesa, em louça',
   'where.takeAway': 'Para levar',
   'where.takeAwayHint': 'Embalamos para viagem',
+  'where.pickup': 'Retirada',
+  'where.pickupHint': 'Você retira o pedido embalado',
+  'where.eatInside': 'Comer no local',
+  'where.eatInsideHint': 'Você consome na casa',
   'where.canChange': 'Dá para trocar depois, na hora de revisar o pedido.',
 
   'menu.search': 'Buscar produto...',
@@ -157,6 +161,10 @@ const ES: Dict = {
   'where.eatHereHint': 'Servimos en la mesa, en vajilla',
   'where.takeAway': 'Para llevar',
   'where.takeAwayHint': 'Empacamos para llevar',
+  'where.pickup': 'Recogida',
+  'where.pickupHint': 'Usted recoge el pedido empacado',
+  'where.eatInside': 'Comer en el local',
+  'where.eatInsideHint': 'Consume en la casa',
   'where.canChange': 'Puede cambiarlo después, al revisar el pedido.',
 
   'menu.search': 'Buscar producto...',
@@ -236,6 +244,10 @@ const EN: Dict = {
   'where.eatHereHint': 'Served at your table, on china',
   'where.takeAway': 'Take away',
   'where.takeAwayHint': 'Packed to go',
+  'where.pickup': 'Pickup',
+  'where.pickupHint': 'You pick up your packed order',
+  'where.eatInside': 'Eat in',
+  'where.eatInsideHint': 'You dine at the venue',
   'where.canChange': 'You can change this later, when reviewing the order.',
 
   'menu.search': 'Search product...',

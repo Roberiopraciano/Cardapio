@@ -20,9 +20,10 @@
 
 import type { CartItem, CartComplement, Offer, WhereConsume } from '../types'
 import { calcCartItemSubtotal } from './pricing'
+import { locationTypeFor } from './locationType'
 
-/** Identifica o canal no campo que o totem usa para a versão do app. */
-export const CARDAPIO_VERSION = 'cardapio-online/1'
+/** Versão do app (package.json), no campo que o totem usa para a versão dele. */
+export const CARDAPIO_VERSION: string = __APP_VERSION__
 
 /**
  * `simpleAuth` é obrigatório no validador, mas nenhuma branch tem
@@ -44,9 +45,11 @@ export interface OrderPayloadInput {
   askEmail: boolean
   comanda?: string
   note?: string
-  mode: 'mesa' | 'balcao'
+  mode: 'mesa' | 'balcao' | 'delivery'
   whereConsume: WhereConsume
   payVia: 'local' | 'totem'
+  /** Forma escolhida pelo cliente; `prepaid` é o da API. Ausente = sem escolha. */
+  payment?: { key: string; label: string; prepaid: boolean; pdvCode?: string }
   tmProduto?: number
   coupon?: Offer | null
 }
@@ -87,7 +90,8 @@ export function flattenComplement(c: CartComplement): FlatComplement {
 }
 
 export function buildOrderPayload(i: OrderPayloadInput) {
-  const localLabel = i.mode === 'balcao' ? 'Pagar no balcão' : 'Pagar na mesa'
+  const localLabel = i.mode === 'mesa' ? 'Pagar na mesa'
+    : i.mode === 'delivery' ? 'Pagar na retirada' : 'Pagar no balcão'
   const label = i.payVia === 'totem' ? 'Pagar no totem' : localLabel
   const email = i.askEmail ? i.client.email?.trim() : ''
   const comanda = i.comanda?.trim()
@@ -98,7 +102,7 @@ export function buildOrderPayload(i: OrderPayloadInput) {
     totemVersion: CARDAPIO_VERSION,
     consumptioncode: i.consumptioncode,
     consumptionint: i.consumptionint,
-    locationType: 8,
+    locationType: locationTypeFor(i.mode),
     amount: i.total,
     subtotal: i.subtotal,
     total: i.total,
@@ -118,13 +122,15 @@ export function buildOrderPayload(i: OrderPayloadInput) {
     totemNF_email: email || null,
     ...(comanda ? { comanda } : {}),
     note: i.note?.trim() || null,
-    // Nada é pago no cardápio: `prepaid: false` sempre. No totem é o que
-    // impede a máquina de pular a cobrança
+    // O cardápio não cobra: `prepaid` só vem da API, pela forma escolhida.
+    // Sem escolha, e no totem, é `false` — é o que impede a máquina de pular a cobrança
     paymentMethod: {
-      type: i.payVia === 'totem' ? 'totem' : i.mode === 'balcao' ? 'counter' : 'table',
+      type: i.payVia === 'totem' ? 'totem' : i.mode === 'mesa' ? 'table' : i.mode === 'delivery' ? 'delivery' : 'counter',
       kind: 'Cardápio',
-      label,
-      prepaid: false,
+      label: i.payVia === 'local' && i.payment ? i.payment.label : label,
+      prepaid: i.payVia === 'local' && i.payment ? i.payment.prepaid : false,
+      ...(i.payVia === 'local' && i.payment ? { method: i.payment.key } : {}),
+      ...(i.payVia === 'local' && i.payment?.pdvCode ? { pdvCode: i.payment.pdvCode } : {}),
       data: { name: label, active: true, change: 0, method: 'Money' },
     },
     additionalInfo: i.whereConsume === 'OnLocal' ? 'Consumir no local' : 'Para levar',

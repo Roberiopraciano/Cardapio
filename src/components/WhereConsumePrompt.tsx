@@ -5,6 +5,7 @@ import type { IconName } from './Icon'
 import { useLangStore } from '../store/langStore'
 import { LANG_META } from '../lib/i18n'
 import Flag from './Flag'
+import type { AppMode } from '../types'
 
 /**
  * Primeira pergunta do cardápio, como no totem: comer aqui ou levar.
@@ -17,9 +18,12 @@ import Flag from './Flag'
 export default function WhereConsumePrompt({
   onDone,
   allowed,
+  mode = 'balcao',
 }: {
   onDone: () => void
   allowed: WhereConsume[]
+  /** No delivery, "levar" é retirada e "aqui" é consumir no local. */
+  mode?: AppMode
 }) {
   const { setWhereConsume } = useCartStore()
   const { lang, available, setLang, t } = useLangStore()
@@ -33,14 +37,14 @@ export default function WhereConsumePrompt({
     {
       value: 'OnLocal',
       icon: 'menu',
-      title: t('where.eatHere'),
-      text: t('where.eatHereHint'),
+      title: t(mode === 'delivery' ? 'where.eatInside' : 'where.eatHere'),
+      text: t(mode === 'delivery' ? 'where.eatInsideHint' : 'where.eatHereHint'),
     },
     {
       value: 'OutsideLocal',
       icon: 'takeaway',
-      title: t('where.takeAway'),
-      text: t('where.takeAwayHint'),
+      title: t(mode === 'delivery' ? 'where.pickup' : 'where.takeAway'),
+      text: t(mode === 'delivery' ? 'where.pickupHint' : 'where.takeAwayHint'),
     },
   ]
 

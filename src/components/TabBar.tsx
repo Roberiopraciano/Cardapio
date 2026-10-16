@@ -18,11 +18,11 @@ interface Tab {
  * consultar — o cliente paga e leva. Ali o que faz sentido é o histórico do
  * próprio aparelho.
  */
-function buildTabs(mode: 'mesa' | 'balcao'): Tab[] {
+function buildTabs(mode: 'mesa' | 'balcao' | 'delivery'): Tab[] {
   return [
     { path: '/', icon: 'menu', label: 'Cardápio', match: ['/produto'] },
     { path: '/checkout', icon: 'cart', label: 'Pedido' },
-    mode === 'balcao'
+    mode !== 'mesa'
       ? { path: '/pedidos', icon: 'bill', label: 'Pedidos' }
       : { path: '/conta', icon: 'bill', label: 'Conta' },
     { path: '/perfil', icon: 'profile', label: 'Perfil' },

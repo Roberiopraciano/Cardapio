@@ -47,6 +47,16 @@ describe('buildOrderPayload — aceito pelo POST api/orders de hoje', () => {
     for (const k of LARAVEL_REQUIRED) expect(laravelFilled(p[k]), k).toBe(true)
   })
 
+  it('totemVersion é a versão do app (package.json), não o nome do canal', () => {
+    expect(buildOrderPayload(input()).totemVersion).toMatch(/^\d+\.\d+\.\d+$/)
+  })
+
+  it('locationType segue a modalidade: balcão 1, mesa 2, delivery 4', () => {
+    expect(buildOrderPayload(input({ mode: 'balcao' })).locationType).toBe(1)
+    expect(buildOrderPayload(input({ mode: 'mesa' })).locationType).toBe(2)
+    expect(buildOrderPayload(input({ mode: 'delivery' })).locationType).toBe(4)
+  })
+
   it('sem simpleAuth na branch manda o marcador, com simpleAuth manda o dela', () => {
     expect(buildOrderPayload(input()).simpleAuth).toBe(SIMPLE_AUTH_FALLBACK)
     expect(buildOrderPayload(input({ simpleAuth: 'abc' })).simpleAuth).toBe('abc')
@@ -64,12 +74,29 @@ describe('buildOrderPayload — aceito pelo POST api/orders de hoje', () => {
     expect(buildOrderPayload(input({ whereConsume: 'OnLocal' })).additionalInfo).toBe('Consumir no local')
   })
 
-  it('nunca prepaid — nada é pago no cardápio', () => {
+  it('sem forma escolhida e no totem, prepaid é false — nada é pago no cardápio', () => {
     const local = buildOrderPayload(input())
     expect(local.paymentMethod.prepaid).toBe(false)
     expect(local.pinpadResponse).toBeNull()
     const t = buildOrderPayload(input({ payVia: 'totem' })).paymentMethod
     expect(t).toMatchObject({ type: 'totem', label: 'Pagar no totem', prepaid: false })
+  })
+
+  it('forma escolhida leva o prepaid que a API cadastrou', () => {
+    const pix = buildOrderPayload(input({ payment: { key: 'pix', label: 'Pix', prepaid: true } })).paymentMethod
+    expect(pix).toMatchObject({ label: 'Pix', method: 'pix', prepaid: true })
+    const cash = buildOrderPayload(input({ payment: { key: 'cash', label: 'Dinheiro', prepaid: false } })).paymentMethod
+    expect(cash).toMatchObject({ label: 'Dinheiro', prepaid: false })
+  })
+
+  it('código PDV da forma vai no pagamento', () => {
+    const pm = buildOrderPayload(input({ payment: { key: 'pix', label: 'Pix iFood', prepaid: false, pdvCode: '42' } })).paymentMethod
+    expect(pm).toMatchObject({ label: 'Pix iFood', pdvCode: '42' })
+  })
+
+  it('no totem a forma escolhida é ignorada', () => {
+    const t = buildOrderPayload(input({ payVia: 'totem', payment: { key: 'pix', label: 'Pix', prepaid: true } })).paymentMethod
+    expect(t).toMatchObject({ label: 'Pagar no totem', prepaid: false })
   })
 
   it('CPF só com dígitos; e-mail só quando a branch pede', () => {

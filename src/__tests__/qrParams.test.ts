@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseQrParams, COUNTER_TABLE, isKnownMode } from '../lib/qrParams'
+import { parseQrParams, COUNTER_TABLE, DELIVERY_TABLE, isKnownMode } from '../lib/qrParams'
 
 const VALID_ID = '658afd3d0ce8b35a1c2d4e6f' // 24 hex
 
@@ -55,11 +55,11 @@ describe('isKnownMode', () => {
   it('aceita os modos implementados', () => {
     expect(isKnownMode('mesa')).toBe(true)
     expect(isKnownMode('balcao')).toBe(true)
+    expect(isKnownMode('delivery')).toBe(true)
   })
 
   it('recusa modo previsto mas não implementado', () => {
     expect(isKnownMode('cartao')).toBe(false)
-    expect(isKnownMode('delivery')).toBe(false)
   })
 
   it('recusa o que não é string', () => {
@@ -69,7 +69,7 @@ describe('isKnownMode', () => {
   })
 
   it('filtrar allowedModes desconhecido esvazia a lista, não escolhe errado', () => {
-    expect(['cartao', 'delivery'].filter(isKnownMode)).toEqual([])
+    expect(['cartao', 'pdv'].filter(isKnownMode)).toEqual([])
     expect(['cartao', 'balcao'].filter(isKnownMode)).toEqual(['balcao'])
   })
 })
@@ -102,8 +102,13 @@ describe('parseQrParams — links inválidos', () => {
   })
 
   it('modo desconhecido → badLink em vez de virar mesa por descuido', () => {
-    expect(parseQrParams(`?branch=${VALID_ID}&mode=delivery`))
+    expect(parseQrParams(`?branch=${VALID_ID}&mode=cartao`))
       .toMatchObject({ ok: false, kind: 'badLink' })
+  })
+
+  it('delivery não exige mesa', () => {
+    expect(parseQrParams(`?branch=${VALID_ID}&mode=delivery`))
+      .toEqual({ ok: true, branchId: VALID_ID, table: DELIVERY_TABLE, mode: 'delivery' })
   })
 
   it('mesa sem table → badLink, não cai em BALCAO', () => {

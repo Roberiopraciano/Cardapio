@@ -78,10 +78,10 @@ export function resetNumero(): void {
 /**
  * Gera o consumptioncode para o modo correto:
  * - Mesa:   usa o nome da mesa (ex: "MESA_03")
- * - Balcão: senha de 5 caracteres aleatórios (ex: "7AK3M")
+ * - Balcão e delivery: senha de 5 caracteres aleatórios (ex: "7AK3M")
  */
 export function gerarConsumptionCode(
-  mode: 'mesa' | 'balcao',
+  mode: 'mesa' | 'balcao' | 'delivery',
   table: string,
 ): string {
   if (mode === 'mesa') return table || 'MESA'

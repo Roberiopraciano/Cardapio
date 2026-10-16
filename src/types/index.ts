@@ -4,6 +4,24 @@
  *  stock.active=true && currentQuantity>0 → em estoque
  *  stock.active=true && currentQuantity<=0 → ESGOTADO
  *  (CategoryFilterHelper.dart) */
+/** Formas de pagamento de uma modalidade; `prepaid` vem do cadastro da forma. */
+export interface CardapioPaymentChannel {
+  /** Modalidade ligada no painel. Ausente (cadastro antigo) = sem restrição. */
+  enabled?: boolean
+  online?: boolean
+  card?: boolean
+  cash?: boolean
+  pix?: boolean
+  /** "Pagar no totem" como forma de pagamento da modalidade. */
+  totem?: boolean
+  /** "Pagar no caixa" como forma de pagamento da modalidade. */
+  caixa?: boolean
+  prepaid?: { online?: boolean; card?: boolean; cash?: boolean; pix?: boolean; totem?: boolean; caixa?: boolean }
+  /** Nome exibido e código do PDV de cada forma, cadastrados no painel. */
+  names?: { online?: string; card?: string; cash?: string; pix?: string; totem?: string; caixa?: string }
+  pdvCodes?: { online?: string; card?: string; cash?: string; pix?: string; totem?: string; caixa?: string }
+}
+
 export interface Stock {
   /** `false` = produto sem controle de estoque (não significa esgotado) */
   active: boolean
@@ -213,7 +231,7 @@ export interface Branch {
      * Ausente = ambos. Se o QR trouxer um modo não permitido, o app usa o
      * primeiro da lista em vez de operar num modo que a casa não suporta.
      */
-    allowedModes?: Array<'mesa' | 'balcao'>
+    allowedModes?: Array<'mesa' | 'balcao' | 'delivery'>
 
     /** Libera o uso de cupons nesta unidade. Ausente ou false mantém desativado. */
     couponsEnabled?: boolean
@@ -261,6 +279,16 @@ export interface Branch {
      * máquina que não existe. Ver `pages/TotemHandoff.tsx`.
      */
     totemPaymentEnabled?: boolean
+    /** Confirmação de pagamento na mesa por PIN (mesa + hora). Exclusivo com o QR Code. */
+    usePinOnPayment?: boolean
+    useQrCodeOnPayment?: boolean
+    paymentMethods?: {
+      payAtCounter?: boolean
+      payAtTotem?: boolean
+      balcao?: CardapioPaymentChannel
+      mesa?: CardapioPaymentChannel
+      delivery?: CardapioPaymentChannel
+    }
 
     /**
      * Validade do carrinho em minutos. Padrão: 240 (4h).
@@ -423,7 +451,7 @@ export interface OrderComplementItem {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-export type AppMode = 'mesa' | 'balcao'
+export type AppMode = 'mesa' | 'balcao' | 'delivery'
 export type ClosedReason = 'outsideHours' | 'branchInactive' | null
 
 export interface URLParams {

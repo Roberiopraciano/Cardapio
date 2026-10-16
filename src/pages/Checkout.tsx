@@ -4,7 +4,6 @@ import { useCartStore } from '../store/cartStore'
 import { useAppStore } from '../store/appStore'
 import { api, OrderError } from '../api/client'
 import { formatCurrency, calcCartItemSubtotal, calcPackagingTotal, calcTmProduto } from '../lib/pricing'
-import { findCouponByCode } from '../lib/stock'
 import { checkBranchOpen } from '../lib/businessPeriod'
 import ImageWithFallback from '../components/ImageWithFallback'
 import HeaderButton from '../components/HeaderButton'
@@ -18,8 +17,11 @@ import ConfirmModal from '../components/ConfirmModal'
 import { Analytics } from '../lib/analytics'
 import { saveTotemHandoff } from '../lib/totemHandoff'
 import { buildOrderPayload } from '../lib/orderPayload'
-import { allowedWhereConsume } from '../lib/whereConsume'
+import { whereConsumeForMode } from '../lib/whereConsume'
 import { readOrderTrackingConfig } from '../lib/orderTracking'
+import { paymentOptionsFor } from '../lib/paymentOptions'
+import { locationTypeFor } from '../lib/locationType'
+import PinModal from '../components/PinModal'
 
 export default function Checkout() {
   const navigate = useNavigate()
@@ -31,43 +33,60 @@ export default function Checkout() {
     setCoupon, total, totalWithCoupon, itemCount, clearCart, loadSavedClient,
     comanda, setComanda, clearCartKeepCodes, setWhereConsumeAsked,
   } = useCartStore()
-  const { branch, params, offers, periods } = useAppStore()
+  const { branch, params, periods } = useAppStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [couponInput, setCouponInput] = useState(couponCode)
   const [couponError, setCouponError] = useState<string | null>(null)
   const [couponLoading, setCouponLoading] = useState(false)
   const [confirmModality, setConfirmModality] = useState(false)
+  const [pinOpen, setPinOpen] = useState(false)
+  // undefined = consultando; null = mesa sem número cadastrado
+  const [tableNumber, setTableNumber] = useState<number | null | undefined>(undefined)
+  const [openedAt] = useState(() => new Date())
   const mode = params?.mode ?? 'mesa'
   const packagingTotal = calcPackagingTotal(items)
 
-  /**
-   * Com `totemPaymentEnabled`, o totem é a **única** forma de pagamento: o
-   * pedido vira QR Code e só vai para a cozinha depois de pago lá. Sem a
-   * chave, segue o fluxo de antes (pedido direto, pagamento na mesa/balcão).
-   */
+  /** "Pagar no totem" é independente do cadastro geral do Cardápio. */
   const cardapioHandoffEnabled = branch?.settingsTotem?.['cardapioHandoffEnabled']
-  const consumptionOptions = allowedWhereConsume(branch?.settingsTotem)
-  const viaTotem = typeof cardapioHandoffEnabled === 'boolean'
-    ? cardapioHandoffEnabled
-    : branch?.settingsWeb?.totemPaymentEnabled === true
+  const totemEnabled = branch?.settingsTotem?.['totemEnabled']
+  const configuredPayAtTotem = branch?.settingsWeb?.paymentMethods?.payAtTotem
+  const channelConfig = branch?.settingsWeb?.paymentMethods?.[mode]
+  const consumptionOptions = whereConsumeForMode(mode, branch?.settingsTotem)
+  // "Pagar no totem" é forma de pagamento de cada modalidade (balcão, mesa e
+  // delivery). Sem o campo no cadastro da unidade vale a regra antiga, global.
+  const totemAvailable = typeof channelConfig?.totem === 'boolean'
+    ? channelConfig.totem && cardapioHandoffEnabled !== false && totemEnabled !== false
+    : typeof configuredPayAtTotem === 'boolean'
+      ? configuredPayAtTotem && cardapioHandoffEnabled !== false && totemEnabled !== false
+      : typeof branch?.settingsWeb?.totemPaymentEnabled === 'boolean'
+        ? branch.settingsWeb.totemPaymentEnabled
+        : cardapioHandoffEnabled === true
+
+  /** Formas marcadas na API para esta modalidade — por enquanto só aparecem em "Fechar conta" (desabilitado). */
+  const methodOptions = paymentOptionsFor(channelConfig)
+  const otherMethods = methodOptions.filter((m) => m.key !== 'totem')
+  const closeBillLabels = [
+    ...methodOptions.map((m) => m.label),
+    // Cadastro antigo: totem liberado pela regra global, sem a forma no canal
+    ...(totemAvailable && !methodOptions.some((m) => m.key === 'totem') ? ['Pagar no totem'] : []),
+  ]
+  // A mesa SEMPRE envia o pedido. Nas demais, "Pagar no totem" só conduz o pedido
+  // (QR Code) quando é a única forma cadastrada; com outras formas, enviar o
+  // pedido não cobra nada.
+  const viaTotem = mode !== 'mesa' && totemAvailable && otherMethods.length === 0
+
+  /** PIN ao enviar o pedido: só na mesa, e não no totem (lá quem confirma é o TEF). */
+  const pinEnabled = mode === 'mesa' && branch?.settingsWeb?.usePinOnPayment === true
+  const pinRequired = pinEnabled && !viaTotem && typeof tableNumber === 'number'
 
   // Comanda por cliente dentro da mesa — só quando a branch liga a opção
   const comandaEnabled = mode === 'mesa' && branch?.settingsWeb?.comandaEnabled === true
   const comandaLabel = branch?.settingsWeb?.comandaLabel?.trim() || 'Comanda'
   const comandaRequired = branch?.settingsWeb?.comandaRequired === true
 
-  /**
-   * O cadastro da campanha é o interruptor do recurso: se a API entregou pelo
-   * menos uma oferta ativa com código, o checkout aceita cupons. Isso elimina a
-   * segunda configuração que deixava campanhas cadastradas invisíveis no menu.
-   */
-  const availableCoupons = offers.filter((offer) => {
-    const coupon = offer.triggers?.['coupon'] as Record<string, unknown> | undefined
-    return typeof coupon?.['code'] === 'string' && coupon['code'].trim() !== ''
-  })
   const branchAllowsCoupons = branch?.settingsWeb?.couponsEnabled === true
-  const COUPONS_ENABLED = branchAllowsCoupons && availableCoupons.length > 0
+  const COUPONS_ENABLED = branchAllowsCoupons
 
   /** E-mail é opt-in por branch: quem não usa não deve pedir dado que não vai
    *  tratar — coletar sem finalidade é justamente o que a LGPD veda. */
@@ -116,6 +135,21 @@ export default function Checkout() {
     Analytics.beginCheckout(items, finalTotal)
   }, [])
 
+  // Número da mesa vem do cadastro (o QR traz só o código). Se a consulta falhar
+  // ou a mesa não tiver número, o PIN não pode ser conferido: segue sem ele, em
+  // vez de travar a venda por um soluço de rede.
+  useEffect(() => {
+    if (!pinEnabled || !params?.branchId || !params.table) return
+    let cancelled = false
+    api.getTableNumber(params.branchId, params.table)
+      .then((n) => { if (!cancelled) setTableNumber(n) })
+      .catch((e) => {
+        console.warn('[pin] não foi possível consultar o número da mesa', e)
+        if (!cancelled) setTableNumber(null)
+      })
+    return () => { cancelled = true }
+  }, [pinEnabled, params?.branchId, params?.table])
+
   // A cotação pertence ao carrinho que foi validado. Se quantidade ou itens
   // mudarem, remove o desconto antigo e exige uma nova validação na API.
   useEffect(() => {
@@ -124,6 +158,11 @@ export default function Checkout() {
     setCoupon(null, couponCode)
     setCouponError('O carrinho mudou. Aplique o cupom novamente para recalcular o desconto.')
   }, [subtotal])
+
+  useEffect(() => {
+    if (!branch || branchAllowsCoupons || !appliedCoupon) return
+    setCoupon(null, '')
+  }, [branch, branchAllowsCoupons, appliedCoupon, setCoupon])
 
   if (isEmpty) return null
 
@@ -155,16 +194,13 @@ export default function Checkout() {
     }
     setCouponError(null)
     if (!couponInput.trim()) { setCoupon(null, ''); return }
-    const found = findCouponByCode(availableCoupons, couponInput)
-    if (!found) { setCouponError('Cupom inválido ou não encontrado.'); return }
-
     setCouponLoading(true)
     try {
       const validation = await api.validateCoupon({
         code: couponInput.trim(),
         branch: params?.branchId ?? '',
         subtotal,
-        locationType: 8,
+        locationType: locationTypeFor(mode),
         customer: clientCpf.replace(/\D/g, '') || clientPhone.replace(/\D/g, '') || undefined,
         items: items.map((item) => ({
           product: item.product._id,
@@ -174,14 +210,16 @@ export default function Checkout() {
           complements: item.addedComplements,
         })),
       })
-      if (!validation.valid) {
+      if (!validation.valid || !validation.offer) {
         setCoupon(null, '')
-        setCouponError(validation.message || 'Cupom inválido para este pedido.')
+        setCouponError(validation.valid
+          ? 'Não foi possível carregar os dados do cupom. Tente novamente.'
+          : validation.message || 'Cupom inválido para este pedido.')
         return
       }
 
       setCoupon({
-        ...found,
+        ...validation.offer,
         validatedDiscount: validation.discount,
         validatedSubtotal: subtotal,
       }, couponInput.trim())
@@ -194,7 +232,8 @@ export default function Checkout() {
     }
   }
 
-  const handleSubmit = async () => {
+  /** `pinOk`: o modal do PIN já validou — pula direto para o envio. */
+  const handleSubmit = async (pinOk = false) => {
     // Nome e telefone são exigidos nos dois modos: a cozinha e o garçom
     // precisam saber de quem é o pedido, e a conta precisa de dono.
     if (requireId && !identity.ok) {
@@ -203,8 +242,8 @@ export default function Checkout() {
       toast.error(msg)
       return
     }
-    if (mode === 'balcao' && !clientName.trim()) {
-      setError('Informe seu nome para ser chamado no balcão.')
+    if (mode !== 'mesa' && !clientName.trim()) {
+      setError('Informe seu nome para ser chamado.')
       return
     }
     // CPF errado quebra a nota fiscal do lado do restaurante e o cliente só
@@ -217,6 +256,14 @@ export default function Checkout() {
     }
     if (comandaEnabled && comandaRequired && !comanda.trim()) {
       setError(`Informe o número da sua ${comandaLabel.toLowerCase()}.`)
+      return
+    }
+    if (pinEnabled && !viaTotem && tableNumber === undefined) {
+      setError('Aguarde um instante e confirme de novo.')
+      return
+    }
+    if (pinRequired && !pinOk) {
+      setPinOpen(true)
       return
     }
     // Vazio hoje em todas as branches: `buildOrderPayload` manda um marcador
@@ -459,7 +506,7 @@ export default function Checkout() {
           )}
         </div>
 
-        {/* Cupom — exige permissão da unidade e ao menos uma campanha ativa */}
+        {/* A unidade libera o campo; a API valida o código digitado. */}
         <div className="rounded-2xl p-4 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)', opacity: COUPONS_ENABLED ? 1 : 0.55 }}>
           <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-hi)' }}>Cupom de desconto</p>
           <div className="flex gap-2">
@@ -479,9 +526,7 @@ export default function Checkout() {
           </div>
           {!COUPONS_ENABLED && (
             <p className="text-xs mt-1.5" style={{ color: 'var(--text-lo)' }}>
-              {branchAllowsCoupons
-                ? 'Nenhum cupom ativo está disponível nesta unidade.'
-                : 'Cupons estão desativados para esta unidade.'}
+              Cupons estão desativados para esta unidade.
             </p>
           )}
           {COUPONS_ENABLED && couponError && <p className="text-xs text-red-500 mt-1.5">{couponError}</p>}
@@ -579,12 +624,26 @@ export default function Checkout() {
               )}
             </div>
           ))}
-          {mode === 'balcao' && (
+          {mode !== 'mesa' && (
             <p className="text-xs text-amber-600">Seu nome será chamado quando o pedido estiver pronto.</p>
           )}
         </div>
 
-        {/* Pagamento — informativo: com o totem ligado, é a única opção */}
+        {/* Fechar conta — as formas de pagamento moram aqui; ainda desabilitado */}
+        {closeBillLabels.length > 0 && !viaTotem && (
+          <button type="button" disabled aria-disabled="true"
+            className="w-full text-left rounded-2xl p-4 border opacity-60 cursor-not-allowed"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            <span className="block text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>
+              Fechar conta
+              <span className="ml-2 text-xs font-normal" style={{ color: 'var(--text-lo)' }}>em breve</span>
+            </span>
+            <span className="block text-xs mt-0.5" style={{ color: 'var(--text-lo)' }}>
+              {closeBillLabels.join(' · ')}
+            </span>
+          </button>
+        )}
+
         {viaTotem && (
           <div className="rounded-2xl p-4 border flex items-start gap-3"
             style={{ background: 'var(--bg-card)', borderColor: 'var(--color-brand)' }}>
@@ -640,15 +699,26 @@ export default function Checkout() {
           <span className="font-semibold" style={{ color: 'var(--text-hi)' }}>Total</span>
           <span className="text-lg font-bold" style={{ color: 'var(--text-hi)' }}>{formatCurrency(finalTotal)}</span>
         </div>
-        <button onClick={handleSubmit} disabled={loading}
+        <button onClick={() => handleSubmit()} disabled={loading}
           className="w-full py-4 rounded-xl text-white font-semibold text-base disabled:opacity-60 active:scale-[0.98] transition-transform"
           style={{ backgroundColor: 'var(--color-brand)' }}>
           {loading
             ? (viaTotem ? 'Gerando QR Code...' : 'Enviando...')
             : viaTotem ? 'Gerar QR Code para o totem'
-            : mode === 'balcao' ? 'Fazer pedido no balcão' : 'Fazer pedido na mesa'}
+            : mode === 'mesa' ? 'Fazer pedido na mesa'
+              : mode === 'delivery' ? 'Fazer pedido' : 'Fazer pedido no balcão'}
         </button>
       </div>
+
+      {pinRequired && (
+        <PinModal
+          open={pinOpen}
+          tableNumber={tableNumber as number}
+          openedAt={openedAt}
+          onCancel={() => setPinOpen(false)}
+          onConfirm={() => { setPinOpen(false); handleSubmit(true) }}
+        />
+      )}
 
       <ConfirmModal
         open={confirmModality}

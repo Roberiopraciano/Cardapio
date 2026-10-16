@@ -12,9 +12,22 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Cardápio</title>
+    <style>
+      html, body { margin: 0; background: #fff; }
+      /* Splash em camada fixa: o Lottie (bootSplash.ts) entra aqui; até lá,
+         uma bolinha CSS evita a tela branca. O App remove a camada ao fim do boot. */
+      #boot-splash { position: fixed; inset: 0; z-index: 9999; background: #fff;
+        display: flex; align-items: center; justify-content: center; transition: opacity .25s; }
+      #boot-splash [data-lottie] { width: 160px; height: 160px; display: flex; align-items: center; justify-content: center; }
+      #boot-splash i { width: 56px; height: 56px; border-radius: 50%; background: #3e9ed5;
+        animation: boot-breathe 1.2s ease-in-out infinite; }
+      @keyframes boot-breathe { 0%,100% { transform: scale(.7); opacity: .5 } 50% { transform: scale(1); opacity: 1 } }
+    </style>
   </head>
   <body>
+    <div id="boot-splash"><div data-lottie><i></i></div></div>
     <div id="root"></div>
+    <script type="module" src="/src/bootSplash.ts"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

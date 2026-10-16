@@ -25,7 +25,7 @@ const OBJECT_ID = /^[a-f\d]{24}$/i
  */
 const TABLE = /^[\p{L}\p{N} _-]{1,32}$/u
 
-const MODES = ['mesa', 'balcao'] as const
+const MODES = ['mesa', 'balcao', 'delivery'] as const
 export type Mode = (typeof MODES)[number]
 
 /**
@@ -42,6 +42,9 @@ export function isKnownMode(v: unknown): v is Mode {
 
 /** Mesa usada quando o modo é balcão — lá não existe mesa. */
 export const COUNTER_TABLE = 'BALCAO'
+
+/** Idem para delivery (retirada ou consumo no local, sem mesa). */
+export const DELIVERY_TABLE = 'DELIVERY'
 
 export interface ValidParams {
   ok: true
@@ -90,6 +93,9 @@ export function parseQrParams(search: string): ValidParams | InvalidParams {
   if (mode === 'balcao') {
     // Balcão não tem mesa: um `table` no link é ruído, não erro.
     return { ok: true, branchId, table: COUNTER_TABLE, mode }
+  }
+  if (mode === 'delivery') {
+    return { ok: true, branchId, table: DELIVERY_TABLE, mode }
   }
 
   const table = (sp.get('table') ?? '').trim()

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { api, clearStaleApiCache, ApiError } from './api/client'
-import { parseQrParams, isKnownMode } from './lib/qrParams'
+import { parseQrParams } from './lib/qrParams'
 import { setStorageScope } from './lib/storageScope'
 import { buildMenuData } from './lib/dataLinker'
 import { preloadMenuImages } from './lib/imageCache'
@@ -12,7 +12,8 @@ import { Analytics } from './lib/analytics'
 import { branchLanguages } from './lib/i18n'
 import { applyMockSettings } from './lib/mockSettings'
 import { applyMenuIdentity, readMenuIdentity } from './lib/pwaIdentity'
-import { allowedWhereConsume } from './lib/whereConsume'
+import { whereConsumeForMode } from './lib/whereConsume'
+import { allowedModesOf } from './lib/modalities'
 import { useLangStore } from './store/langStore'
 import { initAnalyticsIfConsented } from './components/ConsentBanner'
 import ClosedScreen from './components/ClosedScreen'
@@ -57,13 +58,18 @@ function Boot() {
   const {
     setParams, setLoading, setBooted, setClosedReason,
     setBranch, setCompany, setMenuData,
-    loading, closedReason, branch, periods,
+    loading, closedReason, branch, periods, params,
   } = useAppStore()
   const [bootError, setBootError] = useState<BootErrorKind | null>(null)
   const {
     whereConsumeAsked, setWhereConsumeAsked,
     bannersSeen, setBannersSeen,
   } = useCartStore()
+
+  // Remove o #boot-splash (Lottie) quando o boot termina, com sucesso ou erro
+  useEffect(() => {
+    if (!loading) window.__hideBootSplash?.()
+  }, [loading])
 
   useEffect(() => {
     // Link malformado é decidido aqui, sem rede: mandar um `_id` cortado para a
@@ -109,10 +115,26 @@ function Boot() {
         // Recursos que o backend ainda não devolve — ver src/lib/mockSettings.ts
         branchObj.settingsWeb = applyMockSettings(branchObj.settingsWeb)
 
-        // A mesma configuração alimenta Totem e Cardápio. Se houver apenas
+        // A branch pode só operar em mesa, ou só em balcão. QR com modo não
+        // permitido cai no primeiro modo aceito — melhor que rodar num modo
+        // que a casa não atende (ex: pedir "senha de balcão" onde não há balcão)
+        // `allowedModes` vem do cadastro e pode trazer valor que este app não
+        // implementa (`cartao`, previsto na Fase 2.6 do ROADMAP). Sem filtrar,
+        // `allowed[0]` virava o modo interno e o app rodava num modo inexistente
+        // **em silêncio** — nem erro, nem tela: só regra de pagamento e senha
+        // erradas. Valor desconhecido é ignorado, e o modo do QR prevalece.
+        let effectiveMode = mode
+        const allowed = allowedModesOf(branchObj.settingsWeb)
+        if (allowed.length > 0 && !allowed.includes(mode)) {
+          effectiveMode = allowed[0]
+          setParams({ branchId, table, mode: effectiveMode })
+        }
+
+        // A mesma configuração alimenta Totem e Cardápio (mesa só serve no
+        // local, ver whereConsumeForMode). Se houver apenas
         // uma modalidade, aplica direto e não obriga o cliente a confirmar
         // uma escolha que a unidade não oferece.
-        const consumptionOptions = allowedWhereConsume(branchObj.settingsTotem)
+        const consumptionOptions = whereConsumeForMode(effectiveMode, branchObj.settingsTotem)
         const cart = useCartStore.getState()
         if (!consumptionOptions.includes(cart.whereConsume)) {
           cart.setWhereConsume(consumptionOptions[0])
@@ -134,20 +156,6 @@ function Boot() {
           toast.info('Seu carrinho anterior expirou. Os preços podem ter mudado.')
         }
         const companyObj = rawCompany as unknown as import('./types').Company
-
-        // A branch pode só operar em mesa, ou só em balcão. QR com modo não
-        // permitido cai no primeiro modo aceito — melhor que rodar num modo
-        // que a casa não atende (ex: pedir "senha de balcão" onde não há balcão)
-        // `allowedModes` vem do cadastro e pode trazer valor que este app não
-        // implementa (`cartao`, previsto na Fase 2.6 do ROADMAP). Sem filtrar,
-        // `allowed[0]` virava o modo interno e o app rodava num modo inexistente
-        // **em silêncio** — nem erro, nem tela: só regra de pagamento e senha
-        // erradas. Valor desconhecido é ignorado, e o modo do QR prevalece.
-        const allowed = (branchObj.settingsWeb?.allowedModes ?? [])
-          .filter(isKnownMode)
-        if (allowed.length > 0 && !allowed.includes(mode)) {
-          setParams({ branchId, table, mode: allowed[0] })
-        }
 
         setBranch(branchObj)
         setCompany(companyObj)
@@ -232,10 +240,12 @@ function Boot() {
   // A escolha local/viagem muda preço e embalagem, então vem antes do cardápio.
   // A branch pode desligar com settingsWeb.askWhereConsume = false.
   const askWhereConsume = branch?.settingsWeb?.askWhereConsume !== false
-  const consumptionOptions = allowedWhereConsume(branch?.settingsTotem)
+  const appMode = params?.mode ?? 'mesa'
+  const consumptionOptions = whereConsumeForMode(appMode, branch?.settingsTotem)
   if (askWhereConsume && consumptionOptions.length > 1 && !whereConsumeAsked) {
     return <WhereConsumePrompt
       allowed={consumptionOptions}
+      mode={appMode}
       onDone={() => setWhereConsumeAsked(true)}
     />
   }
@@ -260,24 +270,10 @@ function Boot() {
   )
 }
 
+// O splash visual é o #boot-splash do index.html (src/bootSplash.ts); aqui só
+// seguramos a tela e o removemos quando o boot termina.
 function Splash() {
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ background: 'var(--bg-page)' }}>
-      <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-        style={{ backgroundColor: 'var(--color-brand)' }}>
-        <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-        </svg>
-      </div>
-      <div className="flex gap-1.5">
-        {[0,1,2].map((i) => (
-          <div key={i} className="w-2 h-2 rounded-full animate-bounce"
-            style={{ backgroundColor: 'var(--color-brand)', animationDelay: `${i*0.15}s` }} />
-        ))}
-      </div>
-    </div>
-  )
+  return <div className="min-h-screen" style={{ background: 'var(--bg-page)' }} />
 }
 
 export default function App() {

@@ -69,9 +69,11 @@ export default function Confirmation() {
       <div>
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text-hi)' }}>Pedido enviado!</h1>
         <p className="text-sm mt-1.5 leading-relaxed" style={{ color: 'var(--text-lo)' }}>
-          {mode === 'balcao'
-            ? `Retire no balcão quando ${state?.clientName || 'seu nome'} for chamado.`
-            : `Seu pedido foi para a cozinha. Aguarde na mesa ${params?.table ?? ''}.`}
+          {mode === 'mesa'
+            ? `Seu pedido foi para a cozinha. Aguarde na mesa ${params?.table ?? ''}.`
+            : mode === 'delivery'
+              ? `Retire quando ${state?.clientName || 'seu nome'} for chamado.`
+              : `Retire no balcão quando ${state?.clientName || 'seu nome'} for chamado.`}
         </p>
       </div>
 
