@@ -15,7 +15,7 @@
 import type { HistoryOrder } from './orderHistory'
 
 /** ►► TROQUE PARA `false` PARA USAR SÓ O HISTÓRICO REAL DO APARELHO ◄◄ */
-export const MOCK_HISTORY = true
+export const MOCK_HISTORY = false
 
 export const MOCK_HISTORY_BANNER = 'Dados de demonstração — não são seus pedidos'
 

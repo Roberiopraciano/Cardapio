@@ -14,7 +14,7 @@
 import type { Branch } from '../types'
 
 /** ►► TROQUE PARA `false` PARA USAR SÓ O QUE A API DEVOLVE ◄◄ */
-export const MOCK_SETTINGS = true
+export const MOCK_SETTINGS = false
 
 if (MOCK_SETTINGS) {
   console.warn(

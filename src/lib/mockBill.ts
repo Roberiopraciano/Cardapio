@@ -16,7 +16,7 @@ import type { TableOrder, TableSessionInfo } from '../api/client'
 import { CARDAPIO_ORIGIN } from './orderAuthor'
 
 /** ►► TROQUE PARA `false` PARA USAR A API REAL ◄◄ */
-export const MOCK_BILL = true
+export const MOCK_BILL = false
 
 /**
  * Enquanto o mock está ligado a tela mostra uma tarja de aviso e o console
