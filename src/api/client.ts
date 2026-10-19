@@ -458,5 +458,9 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
-    })).then((r) => r.json()).catch(() => ({})),
+    })).then(async (r) => {
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) console.warn('[avaliação] API recusou', r.status, body)
+      return body
+    }).catch(() => ({})),
 }
