@@ -453,7 +453,7 @@ export const api = {
     })).then((r) => r.json()).catch(() => ({})),
 
   /** POST api/reviews — NPS pós-pedido */
-  postReview: (data: { branch: string; consumptioncode: string; rating: number; simpleAuth: string }) =>
+  postReview: (data: { branch: string; consumptioncode: string; rating: number; comment?: string; simpleAuth: string }) =>
     fetch(`${BASE_URL}/api/reviews`, withTimeout({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -3,6 +3,8 @@ import { api } from '../api/client'
 import { toast } from '../store/toastStore'
 import { useAppStore } from '../store/appStore'
 
+const COMMENT_MAX = 500
+
 interface Props {
   consumptioncode: string
   delayMs?: number
@@ -11,7 +13,7 @@ interface Props {
 
 /**
  * Widget de avaliação NPS — aparece N segundos após a confirmação.
- * Estrelas 1–5 → POST api/reviews.
+ * Estrelas 1–5 + comentário opcional → POST api/reviews (um envio só).
  * Auto-dismiss após envio ou clique em "Agora não".
  */
 export default function NpsRating({ consumptioncode, delayMs = 3000, onDismiss }: Props) {
@@ -21,6 +23,7 @@ export default function NpsRating({ consumptioncode, delayMs = 3000, onDismiss }
   const [selected, setSelected] = useState(0)
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
+  const [comment, setComment] = useState('')
 
   useEffect(() => {
     const timer = setTimeout(() => setVisible(true), delayMs)
@@ -31,14 +34,15 @@ export default function NpsRating({ consumptioncode, delayMs = 3000, onDismiss }
 
   const dismiss = () => { setVisible(false); onDismiss?.() }
 
-  const handleRate = async (rating: number) => {
-    setSelected(rating)
+  const handleSend = async () => {
+    if (!selected || sending) return
     setSending(true)
     try {
       await api.postReview({
         branch: params?.branchId ?? '',
         consumptioncode,
-        rating,
+        rating: selected,
+        comment: comment.trim() || undefined,
         simpleAuth: branch?.settingsWeb?.simpleAuth ?? '',
       })
       setSent(true)
@@ -102,7 +106,7 @@ export default function NpsRating({ consumptioncode, delayMs = 3000, onDismiss }
               {[1, 2, 3, 4, 5].map((star) => (
                 <button
                   key={star}
-                  onClick={() => !sending && handleRate(star)}
+                  onClick={() => !sending && setSelected(star)}
                   onMouseEnter={() => setHovered(star)}
                   onMouseLeave={() => setHovered(0)}
                   disabled={sending}
@@ -128,6 +132,34 @@ export default function NpsRating({ consumptioncode, delayMs = 3000, onDismiss }
             <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-brand)', height: 18, marginBottom: 12 }}>
               {LABELS[display] || ''}
             </p>
+
+            {selected > 0 && (
+              <>
+                <textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value.slice(0, COMMENT_MAX))}
+                  disabled={sending}
+                  rows={3}
+                  placeholder="Quer contar mais? (opcional)"
+                  style={{
+                    width: '100%', resize: 'none', fontSize: 14, padding: '10px 12px',
+                    borderRadius: 12, border: '1px solid var(--border)',
+                    background: 'var(--bg-page)', color: 'var(--text-hi)', marginBottom: 10,
+                  }}
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={sending}
+                  style={{
+                    width: '100%', padding: '12px 0', borderRadius: 12, border: 'none',
+                    background: 'var(--color-brand)', color: '#fff', fontSize: 14,
+                    fontWeight: 600, marginBottom: 8, opacity: sending ? 0.6 : 1,
+                  }}
+                >
+                  {sending ? 'Enviando…' : 'Enviar avaliação'}
+                </button>
+              </>
+            )}
 
             <button
               onClick={dismiss}
