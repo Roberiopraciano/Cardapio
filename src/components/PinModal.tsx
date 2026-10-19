@@ -84,7 +84,7 @@ export default function PinModal({
 
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-hi)' }}>PIN do pedido</h2>
         <p className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--text-lo)' }}>
-          Digite o número da mesa (2 dígitos) e a hora de agora (2 dígitos).
+          Digite o Pin.
         </p>
 
         <div className="mt-4 flex flex-col items-center leading-none">
@@ -122,7 +122,7 @@ export default function PinModal({
         </div>
 
         {/* Horário do pedido, pequeno, para o garçom conferir */}
-        <p className="mt-4 text-[10px] tabular-nums" style={{ color: 'var(--text-lo)', opacity: 0.7 }}>
+        <p className="mt-4 text-[12px] tabular-nums" style={{ color: 'var(--text-lo)', opacity: 0.7 }}>
           {clock}
         </p>
       </div>
