@@ -56,32 +56,8 @@ const FAKE: SettingsWeb = {
   comandaLabel: 'Comanda',
   comandaRequired: false,
 
-  // Banners do início da sessão — três, para exercitar o carrossel:
-  // um com link interno, um sem link, e um com link externo
-  banners: [
-    {
-      image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&q=70',
-      title: 'Combo do dia',
-      subtitle: 'Hambúrguer + batata + bebida por R$ 39,90',
-      link: '/',
-      linkLabel: 'Ver o combo',
-      seq: 1,
-    },
-    {
-      image: 'https://images.unsplash.com/photo-1551024506-0bccd828d307?w=800&q=70',
-      title: 'Sobremesa em dobro',
-      subtitle: 'Toda terça, na compra de um açaí',
-      seq: 2,
-    },
-    {
-      image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=800&q=70',
-      title: 'Rodízio de pizza',
-      subtitle: 'Sexta e sábado, a partir das 19h',
-      link: 'https://example.com/rodizio',
-      linkLabel: 'Saiba mais',
-      seq: 3,
-    },
-  ],
+  // Banners do início da sessão vêm só da API (settingsWeb.banners),
+  // cadastrados na Configuração da Franquia — não são mais simulados aqui.
 
   // Acompanhamento de status: finge que a casa tem KDS publicando o pedido.
   // Em produção isso fica DESLIGADO por padrão — status que ninguém move é pior

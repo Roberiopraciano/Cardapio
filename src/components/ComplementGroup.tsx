@@ -246,7 +246,7 @@ function ItemList({
   onChangeSelected: (groupId: string, itemId: string, delta: number) => void
 }) {
   return (
-    <div className="divide-y" style={{ borderColor: 'var(--divider)' }}>
+    <div className="flex flex-col gap-2 p-3">
       {items.map((item) => {
         const qty = selected[item._id] ?? 0
         const itemPrice = (item as ComplementItem & { price: number }).price ?? 0
@@ -311,12 +311,13 @@ function ItemList({
  */
 function SoldOutItem({ item }: { item: ComplementItem }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3 opacity-55 select-none">
+    <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl border opacity-55 select-none"
+      style={{ borderColor: 'var(--border)' }}>
       {item.image && (
         <ImageWithFallback
           src={item.image as string}
           alt={item.name}
-          className="w-10 h-10 rounded-lg object-cover flex-shrink-0 grayscale"
+          className="w-12 h-12 rounded-xl object-cover flex-shrink-0 grayscale"
         />
       )}
       <div className="flex-1 min-w-0">
@@ -365,14 +366,17 @@ function RadioItem({ item, itemPrice, label, selected, onSelect }: {
   return (
     <button
       onClick={onSelect}
-      className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors"
-      style={{ background: selected ? 'var(--color-brand-light)' : 'transparent' }}
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors"
+      style={{
+        background: selected ? 'var(--color-brand-light)' : 'var(--bg-card)',
+        borderColor: selected ? 'var(--color-brand)' : 'var(--border)',
+      }}
     >
       {item.image && (
         <ImageWithFallback
           src={item.image as string}
           alt={item.name}
-          className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+          className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
         />
       )}
 
@@ -435,9 +439,10 @@ function CheckItem({ item, itemPrice, label, qty, maxQty, onChange }: {
       tabIndex={0}
       aria-label={`${item.name}${maxQty === 1 ? '' : ' — tocar adiciona'}`}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRowTap() } }}
-      className="flex items-center gap-3 px-4 py-3 transition-colors cursor-pointer select-none"
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors cursor-pointer select-none"
       style={{
-        background: isSelected ? 'var(--color-brand-light)' : 'transparent',
+        background: isSelected ? 'var(--color-brand-light)' : 'var(--bg-card)',
+        borderColor: isSelected ? 'var(--color-brand)' : 'var(--border)',
         WebkitTapHighlightColor: 'transparent',
       }}
     >
@@ -445,7 +450,7 @@ function CheckItem({ item, itemPrice, label, qty, maxQty, onChange }: {
         <ImageWithFallback
           src={item.image as string}
           alt={item.name}
-          className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+          className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
         />
       )}
 
@@ -523,9 +528,10 @@ function FractionalItem({ item, itemPrice, qty, maxQty, fracTotal, onChange }: {
       onKeyDown={(e) => {
         if ((e.key === 'Enter' || e.key === ' ') && canAdd) { e.preventDefault(); onChange(1) }
       }}
-      className="flex items-center gap-3 px-4 py-3 select-none"
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border select-none"
       style={{
-        background: qty > 0 ? 'rgba(147,51,234,.10)' : 'transparent',
+        background: qty > 0 ? 'rgba(147,51,234,.10)' : 'var(--bg-card)',
+        borderColor: qty > 0 ? '#9333ea' : 'var(--border)',
         cursor: canAdd ? 'pointer' : 'default',
         WebkitTapHighlightColor: 'transparent',
       }}
@@ -534,7 +540,7 @@ function FractionalItem({ item, itemPrice, qty, maxQty, fracTotal, onChange }: {
         <ImageWithFallback
           src={item.image as string}
           alt={item.name}
-          className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+          className="w-12 h-12 rounded-xl object-cover flex-shrink-0"
         />
       )}
 

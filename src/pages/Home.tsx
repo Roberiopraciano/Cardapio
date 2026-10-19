@@ -179,7 +179,7 @@ export default function Home() {
     <div className="min-h-screen" style={{ background: 'var(--bg-page)', paddingBottom: 'calc(140px + env(safe-area-inset-bottom, 0px))' }}>
       {/* Header sticky */}
       <div className="sticky top-0 z-20 shadow-sm" style={{ background: 'var(--bg-card)' }}>
-        <div className="px-4 pt-3 pb-2 flex items-center gap-3">
+        <div className="max-w-6xl mx-auto w-full px-4 pt-3 pb-2 flex items-center gap-3">
           {/* Recomeçar: volta ao carrossel / consumo / idioma */}
           <HeaderButton icon="back" onClick={handleRestart} label="Recomeçar" emphasis />
 
@@ -223,7 +223,7 @@ export default function Home() {
           quem não procura por ícone — e o botão ainda disputava espaço com o
           seletor de idioma numa barra que já estava cheia.
         */}
-        <div className="px-4 pb-2 relative">
+        <div className="max-w-6xl mx-auto w-full px-4 pb-2 relative">
           <span className="absolute left-7 top-1/2 -translate-y-1/2 pointer-events-none"
             style={{ color: 'var(--text-lo)', marginTop: -4 }}>
             <Icon name="search" size={13} />
@@ -251,7 +251,7 @@ export default function Home() {
         {/* Tabs de categoria */}
         {!searchQuery && (
           loading ? <CategoryTabsSkeleton /> : (
-            <div className="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
+            <div className="max-w-6xl mx-auto w-full flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
               {categories.map(cat => {
                 const active = activeCat === cat._id
                 return (
@@ -288,7 +288,7 @@ export default function Home() {
 
       {/* Resultados da busca com highlight */}
       {searchQuery && (
-        <div className="px-4 pt-4">
+        <div className="max-w-6xl mx-auto w-full px-4 pt-4">
           {searchResults.length === 0 ? (
             <p className="text-sm text-center py-10" style={{ color: 'var(--text-lo)' }}>
               Nenhum resultado para "{searchQuery}"
@@ -298,7 +298,7 @@ export default function Home() {
               <p className="text-xs mb-3" style={{ color: 'var(--text-lo)' }}>
                 {searchResults.length} resultado{searchResults.length > 1 ? 's' : ''}
               </p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
                 {searchResults.map(p => (
                   <SearchProductCard key={p._id} product={p} query={searchQuery} />
                 ))}
@@ -311,15 +311,18 @@ export default function Home() {
       {/* Somente a categoria selecionada */}
       {!searchQuery && (
         loading ? <MenuSkeleton /> : currentCat && (
-          <div className="px-4 pt-4">
+          <div className="max-w-6xl mx-auto w-full px-4 pt-4">
             <div className="flex items-center gap-2 mb-3">
               {currentCat.image && (
                 <ImageWithFallback src={currentCat.image} alt={currentCat.name}
                   className="w-7 h-7 rounded-lg object-cover flex-shrink-0" />
               )}
               <h2 className="text-sm font-bold" style={{ color: 'var(--text-hi)' }}>{tr.name(currentCat)}</h2>
-              <span className="text-xs ml-auto" style={{ color: 'var(--text-lo)' }}>
-                {visibleProducts.length}
+              <span
+                className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                style={{ background: 'var(--color-brand-light)', color: 'var(--color-brand)' }}
+              >
+                {visibleProducts.length} {visibleProducts.length === 1 ? 'item' : 'itens'}
               </span>
             </div>
 
@@ -330,7 +333,7 @@ export default function Home() {
             ) : (
               /* key na categoria: força remontar o grid ao trocar de aba, em vez
                  de o React reaproveitar os cards da categoria anterior */
-              <div key={currentCat._id} className="grid grid-cols-2 gap-3">
+              <div key={currentCat._id} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
                 {visibleProducts.map(p => <ProductCard key={p._id} product={p} />)}
               </div>
             )}
@@ -341,7 +344,7 @@ export default function Home() {
       {/* FAB carrinho */}
       {count > 0 && (
         /* Acima da TabBar (56px + área segura do iPhone) */
-        <div className="fixed left-4 right-4 z-20"
+        <div className="fixed left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-xl z-20"
           style={{ bottom: 'calc(60px + env(safe-area-inset-bottom, 0px))' }}>
           <button
             onClick={() => setCartOpen(true)}

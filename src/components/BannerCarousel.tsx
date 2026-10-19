@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import type { BranchBanner } from '../types'
 import ImageWithFallback from './ImageWithFallback'
 import Icon from './Icon'
@@ -25,7 +24,6 @@ const AUTOPLAY_MS = 6000
  * controle e ele não volta a mexer sozinho.
  */
 export default function BannerCarousel({ banners, onClose, required }: Props) {
-  const navigate = useNavigate()
   const [index, setIndex] = useState(0)
   /** Índice mais avançado que o cliente já viu — libera a saída no modo obrigatório */
   const [seenMax, setSeenMax] = useState(0)
@@ -63,21 +61,9 @@ export default function BannerCarousel({ banners, onClose, required }: Props) {
 
   if (slides.length === 0) return null
 
-  const current = slides[index]
   const isLast = index === last
   // No modo obrigatório, só libera depois de ter chegado ao último
   const canLeave = !required || seenMax >= last
-
-  const handleLink = (link: string) => {
-    // Link externo abre em nova aba e não tira o cliente do pedido;
-    // interno navega no próprio app.
-    if (/^https?:\/\//i.test(link)) {
-      window.open(link, '_blank', 'noopener,noreferrer')
-      return
-    }
-    onClose()
-    navigate(link)
-  }
 
   const onTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0]?.clientX ?? null
@@ -92,9 +78,9 @@ export default function BannerCarousel({ banners, onClose, required }: Props) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg-page)' }}>
+    <div className="min-h-screen flex flex-col items-center" style={{ background: 'var(--bg-page)' }}>
       {/* Sair — some enquanto o cliente não viu todos, no modo obrigatório */}
-      <div className="flex justify-between items-center p-3 h-14">
+      <div className="flex justify-between items-center p-3 h-14 w-full max-w-md md:max-w-lg">
         <span className="text-xs font-semibold" style={{ color: 'var(--text-lo)' }}>
           {index + 1} de {slides.length}
         </span>
@@ -110,7 +96,7 @@ export default function BannerCarousel({ banners, onClose, required }: Props) {
       </div>
 
       <div
-        className="flex-1 flex flex-col justify-center px-4 pb-6"
+        className="flex-1 flex flex-col justify-center px-4 pb-6 w-full max-w-md md:max-w-lg"
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
@@ -140,8 +126,8 @@ export default function BannerCarousel({ banners, onClose, required }: Props) {
                 <ImageWithFallback
                   src={slide.image}
                   alt={slide.title ?? 'Promoção'}
-                  className="w-full aspect-[4/5] object-cover"
-                  skeletonClassName="w-full aspect-[4/5]"
+                  className="w-full aspect-[4/5] max-h-[calc(100vh-17rem)] object-cover"
+                  skeletonClassName="w-full aspect-[4/5] max-h-[calc(100vh-17rem)]"
                 />
                 {(slide.title || slide.subtitle) && (
                   <div className="absolute inset-x-0 bottom-0 p-5"
@@ -205,20 +191,6 @@ export default function BannerCarousel({ banners, onClose, required }: Props) {
         )}
 
         <div className="mt-5 flex flex-col gap-2">
-          {current.link && (
-            <button
-              onClick={() => handleLink(current.link!)}
-              className="w-full py-3.5 rounded-xl font-semibold text-sm active:scale-[0.98] transition-transform border"
-              style={{
-                background: 'var(--bg-card)',
-                borderColor: 'var(--color-brand-medium)',
-                color: 'var(--color-brand)',
-              }}
-            >
-              {current.linkLabel?.trim() || 'Ver'}
-            </button>
-          )}
-
           {/* Ação principal: avança, e no último banner vira a saída */}
           <button
             onClick={() => (isLast ? onClose() : go(index + 1))}

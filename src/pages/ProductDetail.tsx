@@ -320,8 +320,8 @@ export default function ProductDetail() {
         </div>
 
         <ImageWithFallback src={product.image} alt={product.name}
-          className={`w-full h-64 object-cover ${!orderable ? 'grayscale opacity-60' : ''}`}
-          skeletonClassName="w-full h-64" />
+          className={`w-full h-64 md:h-80 object-cover ${!orderable ? 'grayscale opacity-60' : ''}`}
+          skeletonClassName="w-full h-64 md:h-80" />
 
         {badge && (
           <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.3)' }}>
@@ -477,7 +477,7 @@ export default function ProductDetail() {
 
       {/* Barra inferior */}
       {orderable && (
-        <div className="fixed bottom-0 left-0 right-0 border-t px-4 py-3"
+        <div className="fixed bottom-0 left-0 right-0 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-3xl border-t px-4 py-3"
           style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-3">
             {/* Seletor de quantidade */}

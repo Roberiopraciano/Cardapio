@@ -22,9 +22,9 @@ function buildTabs(mode: 'mesa' | 'balcao' | 'delivery'): Tab[] {
   return [
     { path: '/', icon: 'menu', label: 'Cardápio', match: ['/produto'] },
     { path: '/checkout', icon: 'cart', label: 'Pedido' },
-    mode !== 'mesa'
-      ? { path: '/pedidos', icon: 'bill', label: 'Pedidos' }
-      : { path: '/conta', icon: 'bill', label: 'Conta' },
+    // "Pedidos" (histórico) fora do menu por enquanto: ainda roda com dados
+    // simulados (MOCK_HISTORY). A rota /pedidos segue existindo.
+    ...(mode === 'mesa' ? [{ path: '/conta', icon: 'bill' as IconName, label: 'Conta' }] : []),
     { path: '/perfil', icon: 'profile', label: 'Perfil' },
   ]
 }
@@ -59,7 +59,7 @@ export default function TabBar() {
   return (
     <nav
       // z-40: acima das barras fixas de total (z-20) das telas internas
-      className="fixed bottom-0 left-0 right-0 z-40 flex justify-around px-2 pt-2"
+      className="fixed bottom-0 left-0 right-0 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-xl md:rounded-t-2xl z-40 flex justify-around px-2 pt-2"
       style={{
         background: 'color-mix(in srgb, var(--bg-card) 88%, transparent)',
         backdropFilter: 'blur(16px)',

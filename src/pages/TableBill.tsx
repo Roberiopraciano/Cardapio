@@ -768,7 +768,7 @@ export default function TableBill() {
       {/* Total fixo */}
       {visible.length > 0 && (
         /* Encostada na TabBar, não no fundo da tela */
-        <div className="fixed left-0 right-0 border-t px-4 py-3 z-20"
+        <div className="fixed left-0 right-0 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-3xl border-t px-4 py-3 z-20"
           style={{
             background: 'var(--bg-card)',
             borderColor: 'var(--border)',

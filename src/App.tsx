@@ -23,6 +23,7 @@ import type { BootErrorKind } from './components/ErrorScreen'
 import ConsentBanner from './components/ConsentBanner'
 import WhereConsumePrompt from './components/WhereConsumePrompt'
 import BannerCarousel from './components/BannerCarousel'
+import type { BranchBanner } from './types'
 import { useCartStore } from './store/cartStore'
 import { toast } from './store/toastStore'
 import ToastContainer from './components/ToastContainer'
@@ -58,7 +59,7 @@ function Boot() {
   const {
     setParams, setLoading, setBooted, setClosedReason,
     setBranch, setCompany, setMenuData,
-    loading, closedReason, branch, periods, params,
+    loading, closedReason, branch, company, periods, params,
   } = useAppStore()
   const [bootError, setBootError] = useState<BootErrorKind | null>(null)
   const {
@@ -226,7 +227,13 @@ function Boot() {
   // A promoção vem primeiro porque é a única tela que o cliente pode pular;
   // as perguntas vêm depois, já com ele decidido a pedir.
 
-  const banners = branch?.settingsWeb?.banners ?? []
+  // Fonte: "Banner(s) cardápio" da Configuração da Franquia (company.bannerCardapio).
+  // `settingsWeb.banners` da unidade, se vier, tem prioridade.
+  const web = branch?.settingsWeb
+  const uploaded: BranchBanner[] = (company?.bannerCardapio?.image ?? [])
+    .filter((i) => i.active !== false && i.photo)
+    .map((i, n) => ({ image: i.photo, seq: n }))
+  const banners = web?.banners?.length ? web.banners : uploaded
   if (banners.length > 0 && !bannersSeen) {
     return (
       <BannerCarousel
@@ -254,13 +261,13 @@ function Boot() {
     <>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/produto/:id" element={<ProductDetail />} />
-        <Route path="/checkout" element={<Checkout />} />
-        <Route path="/confirmacao" element={<Confirmation />} />
-        <Route path="/totem" element={<TotemHandoffPage />} />
-        <Route path="/conta" element={<TableBill />} />
-        <Route path="/perfil" element={<Profile />} />
-        <Route path="/pedidos" element={<OrderHistory />} />
+        <Route path="/produto/:id" element={<Col><ProductDetail /></Col>} />
+        <Route path="/checkout" element={<Col><Checkout /></Col>} />
+        <Route path="/confirmacao" element={<Col><Confirmation /></Col>} />
+        <Route path="/totem" element={<Col><TotemHandoffPage /></Col>} />
+        <Route path="/conta" element={<Col><TableBill /></Col>} />
+        <Route path="/perfil" element={<Col><Profile /></Col>} />
+        <Route path="/pedidos" element={<Col><OrderHistory /></Col>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <TabBar />
@@ -268,6 +275,14 @@ function Boot() {
       <ToastContainer />
     </>
   )
+}
+
+/**
+ * Coluna de leitura das telas internas no PC. No celular ocupa a largura toda;
+ * a Home tem layout próprio (grid largo) e não passa por aqui.
+ */
+function Col({ children }: { children: React.ReactNode }) {
+  return <div className="mx-auto w-full max-w-3xl">{children}</div>
 }
 
 // O splash visual é o #boot-splash do index.html (src/bootSplash.ts); aqui só

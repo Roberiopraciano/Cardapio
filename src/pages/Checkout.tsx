@@ -671,7 +671,7 @@ export default function Checkout() {
 
       {/* Barra de total — encostada na TabBar, não no fundo da tela.
           Sem esse deslocamento a aba cobria o botão de enviar o pedido. */}
-      <div className="fixed left-0 right-0 border-t px-4 py-3 z-20"
+      <div className="fixed left-0 right-0 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-3xl border-t px-4 py-3 z-20"
         style={{
           background: 'var(--bg-card)',
           borderColor: 'var(--border)',

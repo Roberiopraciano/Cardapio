@@ -369,6 +369,8 @@ export interface Company {
   _id: string
   name: string
   slug?: string
+  /** "Banner(s) cardápio" da Configuração da Franquia (TotemApiv2). */
+  bannerCardapio?: { image?: Array<{ photo: string; active?: boolean }> }
   settingsTotem?: {
     primaryColor?: string
     logo?: string
