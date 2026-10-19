@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useCartStore } from '../store/cartStore'
 import { useAppStore } from '../store/appStore'
+import { toast } from '../store/toastStore'
 import Icon from './Icon'
 import { loadAvatar } from '../lib/avatar'
 import type { IconName } from './Icon'
@@ -74,7 +75,14 @@ export default function TabBar() {
         return (
           <button
             key={tab.path}
-            onClick={() => navigate(tab.path)}
+            onClick={() => {
+              // Carrinho vazio: o checkout só redirecionaria de volta (a tela piscava)
+              if (tab.path === '/checkout' && count === 0) {
+                toast.warning('Não possui nenhum pedido aberto')
+                return
+              }
+              navigate(tab.path)
+            }}
             className="relative flex-1 flex flex-col items-center justify-end gap-1 pb-0.5"
             style={{ WebkitTapHighlightColor: 'transparent' }}
             aria-current={active ? 'page' : undefined}

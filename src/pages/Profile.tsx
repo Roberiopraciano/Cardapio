@@ -6,8 +6,9 @@ import { useLangStore } from '../store/langStore'
 import { LANG_META } from '../lib/i18n'
 import type { Lang } from '../lib/i18n'
 import {
-  clearClientInfo, formatPhone, formatCPF, cpfState, CPF_MESSAGE, maskCPFInput,
+  clearClientInfo, formatCPF, cpfState, CPF_MESSAGE, maskCPFInput,
 } from '../lib/client_storage'
+import { maskPhoneInput, phoneDigits, phoneState, PHONE_MESSAGE } from '../lib/identity'
 import { getConsent, setConsent } from '../lib/consent'
 import { toast } from '../store/toastStore'
 import HeaderButton from '../components/HeaderButton'
@@ -60,6 +61,7 @@ export default function Profile() {
   }, [])
 
   const cpf = cpfState(clientCpf)
+  const phone = phoneState(clientPhone)
   const privacyUrl = branch?.settingsWeb?.privacyPolicyUrl?.trim()
   const privacyEmail = branch?.settingsWeb?.privacyContactEmail?.trim()
   const askEmail = branch?.settingsWeb?.askEmail === true
@@ -143,11 +145,11 @@ export default function Profile() {
           />
           <Field
             label="Telefone"
-            value={clientPhone}
-            onChange={setClientPhone}
-            placeholder="(00) 00000-0000"
+            value={maskPhoneInput(clientPhone)}
+            onChange={(v) => setClientPhone(phoneDigits(v))}
+            placeholder="(99) 999999999"
             type="tel"
-            hint={clientPhone.trim() ? formatPhone(clientPhone) : undefined}
+            error={PHONE_MESSAGE[phone]}
           />
           {askEmail && (
             <Field

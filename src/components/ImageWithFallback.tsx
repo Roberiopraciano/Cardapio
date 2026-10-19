@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { getCachedUrl } from '../lib/imageCache'
 
 interface Props {
@@ -22,14 +22,15 @@ export default function ImageWithFallback({
   skeletonClassName = '',
   fallback,
 }: Props) {
-  const [loaded, setLoaded] = useState(false)
-  const [error, setError] = useState(false)
   const resolvedSrc = src ? getCachedUrl(src) : ''
-
-  useEffect(() => {
-    setLoaded(false)
-    setError(false)
-  }, [src])
+  // Estado amarrado à URL, não a um booleano solto. Antes, um `useEffect` zerava
+  // `loaded` a cada montagem — se a imagem já estava em cache e o `onLoad`
+  // disparava antes do efeito, o reset vinha depois e a foto ficava para sempre
+  // em `opacity-0` (card "branco", mas a imagem estava lá e dava para copiar).
+  const [loadedSrc, setLoadedSrc] = useState('')
+  const [failedSrc, setFailedSrc] = useState('')
+  const loaded = loadedSrc === resolvedSrc
+  const error = failedSrc === src
 
   if (!resolvedSrc || error) {
     /**
@@ -96,12 +97,14 @@ export default function ImageWithFallback({
         />
       )}
       <img
+        // Imagem já completa na montagem: o `load` pode ter passado antes do listener
+        ref={(img) => { if (img?.complete && img.naturalWidth > 0) setLoadedSrc(resolvedSrc) }}
         src={resolvedSrc}
         alt={alt}
         loading="lazy"
         className={`${className} ${loaded ? 'opacity-100' : 'opacity-0'} transition-opacity duration-300`}
-        onLoad={() => setLoaded(true)}
-        onError={() => setError(true)}
+        onLoad={() => setLoadedSrc(resolvedSrc)}
+        onError={() => setFailedSrc(src)}
       />
     </div>
   )

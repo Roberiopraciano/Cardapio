@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCartStore } from '../store/cartStore'
-import { checkIdentity } from '../lib/identity'
-import { formatPhone } from '../lib/client_storage'
+import { checkIdentity, maskPhoneInput, phoneDigits, phoneState, PHONE_MESSAGE } from '../lib/identity'
 import Icon from './Icon'
 import HeaderButton from './HeaderButton'
 import GoogleSignInButton from './GoogleSignInButton'
@@ -81,15 +80,15 @@ export default function IdentifyGate({ reason, onDone }: Props) {
               type="tel"
               inputMode="tel"
               autoComplete="tel"
-              value={clientPhone}
-              onChange={(e) => setClientPhone(e.target.value)}
-              placeholder="(00) 00000-0000"
+              value={maskPhoneInput(clientPhone)}
+              onChange={(e) => setClientPhone(phoneDigits(e.target.value))}
+              placeholder="(99) 999999999"
               className="w-full text-sm rounded-xl px-3 py-3.5 outline-none"
               style={{ background: 'var(--bg-input)', color: 'var(--text-hi)', border: '1px solid var(--border)' }}
             />
-            {clientPhone.trim() && (
-              <span className="block text-xs mt-1" style={{ color: 'var(--text-lo)' }}>
-                {formatPhone(clientPhone)}
+            {PHONE_MESSAGE[phoneState(clientPhone)] && (
+              <span className="block text-xs mt-1" style={{ color: '#dc2626' }}>
+                {PHONE_MESSAGE[phoneState(clientPhone)]}
               </span>
             )}
           </label>

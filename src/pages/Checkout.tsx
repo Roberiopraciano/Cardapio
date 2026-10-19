@@ -9,7 +9,9 @@ import ImageWithFallback from '../components/ImageWithFallback'
 import HeaderButton from '../components/HeaderButton'
 import Icon from '../components/Icon'
 import { pushOrderHistory } from '../lib/orderHistory'
-import { checkIdentity, identityMessage } from '../lib/identity'
+import {
+  checkIdentity, identityMessage, maskPhoneInput, phoneDigits, phoneState, PHONE_MESSAGE,
+} from '../lib/identity'
 import { maskCPFInput, cpfState, CPF_MESSAGE } from '../lib/client_storage'
 import { toast } from '../store/toastStore'
 import GoogleSignInButton from '../components/GoogleSignInButton'
@@ -107,7 +109,10 @@ export default function Checkout() {
     },
     {
       key: 'phone', type: 'tel', inputMode: 'tel' as const, autoComplete: 'tel',
-      placeholder: 'Telefone', value: clientPhone, onChange: setClientPhone,
+      placeholder: '(99) 999999999', value: maskPhoneInput(clientPhone),
+      onChange: (v: string) => setClientPhone(phoneDigits(v)),
+      error: PHONE_MESSAGE[phoneState(clientPhone)],
+      valid: phoneState(clientPhone) === 'valid',
     },
     ...(askEmail ? [{
       key: 'email', type: 'email', inputMode: 'email' as const, autoComplete: 'email',
@@ -226,7 +231,8 @@ export default function Checkout() {
       }, couponInput.trim())
       setCouponError(null)
       Analytics.applyCoupon(couponInput, subtotal)
-    } catch {
+    } catch (e) {
+      console.warn('[cupom] falha ao validar', e)
       setCouponError('Não foi possível validar o cupom. Tente novamente.')
     } finally {
       setCouponLoading(false)

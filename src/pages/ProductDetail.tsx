@@ -314,7 +314,14 @@ export default function ProductDetail() {
       <div className="relative">
         {/* Mesmo componente das demais telas — só com sombra, porque aqui ele
             fica sobre a foto do produto */}
-        <div className="absolute top-4 left-4 z-10">
+        {/* `fixed`: acompanha a rolagem, senão a seta some e o cliente fica sem saída */}
+        <div className="fixed z-30"
+          style={{
+            top: 'calc(16px + env(safe-area-inset-top, 0px))',
+            // Coluna do app é `max-w-3xl` (48rem) centrada: no PC a seta acompanha
+            // a borda do card em vez de colar na borda da janela
+            left: 'max(1rem, calc((100vw - 48rem) / 2 + 1rem))',
+          }}>
           <HeaderButton icon="back" onClick={() => navigate(-1)}
             label="Voltar" emphasis overlay />
         </div>

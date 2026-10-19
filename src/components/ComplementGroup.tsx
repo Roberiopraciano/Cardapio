@@ -196,8 +196,11 @@ export default function ComplementGroup({
                   <span className="text-sm font-medium" style={{ color: 'var(--text-hi)' }}>
                     {name}
                   </span>
-                  <span className="text-xs" style={{ color: 'var(--text-lo)' }}>
-                    ({items.length})
+                  <span
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                    style={{ background: 'var(--color-brand-light)', color: 'var(--color-brand)' }}
+                  >
+                    {items.length} {items.length === 1 ? 'item' : 'itens'}
                   </span>
                   {subChosen > 0 && (
                     <span
