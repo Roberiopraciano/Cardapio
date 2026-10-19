@@ -28,6 +28,25 @@ export function acceptedHours(now: Date, openedAt: Date): number[] {
   return [...new Set([now.getHours(), openedAt.getHours()])]
 }
 
+/** Depois de acertar o PIN, a mesa fica liberada por 1 hora. */
+export const PIN_GRACE_MS = 60 * 60 * 1000
+
+const graceKey = (tableNumber: number) => `pin_ok_mesa_${tableNumber}`
+
+export function markPinVerified(tableNumber: number, now = Date.now()): void {
+  try { localStorage.setItem(graceKey(tableNumber), String(now)) } catch { /* storage bloqueado */ }
+}
+
+/** true se o PIN dessa mesa foi acertado há menos de 1 hora. */
+export function isPinStillValid(tableNumber: number, now = Date.now()): boolean {
+  try {
+    const at = Number(localStorage.getItem(graceKey(tableNumber)))
+    return Number.isFinite(at) && at > 0 && now >= at && now - at < PIN_GRACE_MS
+  } catch {
+    return false
+  }
+}
+
 export function isPinValid(
   input: string,
   tableNumber: number,

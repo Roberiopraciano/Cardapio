@@ -110,6 +110,8 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
+        // Sem "workbox Using NetworkFirst to respond to…" no console do dev
+        disableDevLogs: true,
         // Rotas do React Router servidas pelo shell quando offline
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],

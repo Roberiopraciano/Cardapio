@@ -4,6 +4,7 @@ import { useAppStore } from '../store/appStore'
 import { useCartStore } from '../store/cartStore'
 import { useOrderPolling } from '../hooks/useOrderPolling'
 import { statusTrackingEnabled, buildStatusPortalUrl } from '../lib/statusPanel'
+import { tableLabel } from '../lib/tableLabel'
 import Icon from '../components/Icon'
 import NpsRating from '../components/NpsRating'
 
@@ -70,7 +71,7 @@ export default function Confirmation() {
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text-hi)' }}>Pedido enviado!</h1>
         <p className="text-sm mt-1.5 leading-relaxed" style={{ color: 'var(--text-lo)' }}>
           {mode === 'mesa'
-            ? `Seu pedido foi para a cozinha. Aguarde na mesa ${params?.table ?? ''}.`
+            ? `Seu pedido foi para a cozinha. Aguarde na ${tableLabel(params?.table).toLowerCase() || 'mesa'}.`
             : mode === 'delivery'
               ? `Retire quando ${state?.clientName || 'seu nome'} for chamado.`
               : `Retire no balcão quando ${state?.clientName || 'seu nome'} for chamado.`}
@@ -82,10 +83,10 @@ export default function Confirmation() {
         style={{ background: 'var(--color-brand-light)', border: '1px solid var(--color-brand-medium)' }}>
         <p className="text-xs font-semibold uppercase tracking-widest mb-1"
           style={{ color: 'var(--color-brand)' }}>
-          {mode === 'mesa' ? 'Mesa' : 'Sua senha'}
+          {mode === 'mesa' ? 'Sua mesa' : 'Sua senha'}
         </p>
         <p className="text-5xl font-bold tracking-widest" style={{ color: 'var(--color-brand)' }}>
-          {consumptioncode}
+          {mode === 'mesa' ? (tableLabel(consumptioncode) || consumptioncode) : consumptioncode}
         </p>
         {consumptionint > 0 && (
           <p className="text-sm mt-1" style={{ color: 'var(--color-brand)' }}>

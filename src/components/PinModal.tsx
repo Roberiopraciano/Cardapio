@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom'
 import PinInput from './PinInput'
 import { isPinValid, PIN_LENGTH } from '../lib/pin'
 
+const formatClock = (d: Date) =>
+  d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+
 /**
  * PIN de pagamento em modal próprio: abre ao tocar em "Enviar pedido" e só
  * libera o envio com o PIN certo (número da mesa + hora). Ver `lib/pin.ts`.
@@ -22,6 +25,15 @@ export default function PinModal({
 }) {
   const [pin, setPin] = useState('')
   const [wrong, setWrong] = useState(false)
+
+  // Relógio do modal: o garçom confere mesa e horário do pedido
+  const [clock, setClock] = useState(() => formatClock(new Date()))
+  useEffect(() => {
+    if (!open) return
+    setClock(formatClock(new Date()))
+    const id = setInterval(() => setClock(formatClock(new Date())), 1000)
+    return () => clearInterval(id)
+  }, [open])
 
   // Cada abertura começa limpa: PIN digitado antes não pode sobrar
   useEffect(() => {
@@ -75,6 +87,11 @@ export default function PinModal({
           Digite o número da mesa (2 dígitos) e a hora de agora (2 dígitos).
         </p>
 
+        <div className="mt-4 flex flex-col items-center leading-none">
+          <span className="text-xs uppercase tracking-wide" style={{ color: 'var(--text-lo)' }}>Mesa</span>
+          <span className="text-5xl font-bold mt-1" style={{ color: 'var(--text-hi)' }}>{tableNumber}</span>
+        </div>
+
         <div className="mt-5">
           <PinInput value={pin} invalid={wrong}
             onChange={(v) => { setPin(v); setWrong(false) }} />
@@ -82,7 +99,7 @@ export default function PinModal({
 
         {wrong && (
           <p className="text-xs mt-3" style={{ color: '#dc2626' }}>
-            PIN incorreto. Confira o número da mesa e a hora.
+            PIN incorreto
           </p>
         )}
 
@@ -103,6 +120,11 @@ export default function PinModal({
             Cancelar
           </button>
         </div>
+
+        {/* Horário do pedido, pequeno, para o garçom conferir */}
+        <p className="mt-4 text-[10px] tabular-nums" style={{ color: 'var(--text-lo)', opacity: 0.7 }}>
+          {clock}
+        </p>
       </div>
     </div>,
     document.body,

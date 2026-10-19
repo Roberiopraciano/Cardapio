@@ -120,9 +120,4 @@ export function applyCompanyTheme(settings: Settings): void {
     root.style.setProperty('--divider', withAlpha(onBg, 0.08))
     root.style.setProperty('color-scheme', luminance(background) > 0.5 ? 'light' : 'dark')
   }
-
-  if (import.meta.env.DEV) {
-    console.info('[tema] marca:', brand, '| fundo:', background ?? '(padrão do app)',
-      '| settingsTotem:', settings)
-  }
 }

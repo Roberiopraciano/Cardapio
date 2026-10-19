@@ -4,7 +4,9 @@ import type { Offer } from '../types'
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? ''
 
-if (!BASE_URL) {
+// No `npm run dev` com proxy (`.env.development.local`), vazio é proposital: as
+// chamadas vão para o próprio Vite, que repassa — por isso só avisa no build.
+if (!BASE_URL && import.meta.env.PROD) {
   // Falha barulhenta no boot: build sem VITE_API_URL só quebraria no primeiro fetch.
   console.error('VITE_API_URL não definida — o app não conseguirá carregar o cardápio.')
 }

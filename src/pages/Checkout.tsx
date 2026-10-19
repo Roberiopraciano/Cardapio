@@ -22,6 +22,7 @@ import { readOrderTrackingConfig } from '../lib/orderTracking'
 import { paymentOptionsFor } from '../lib/paymentOptions'
 import { locationTypeFor } from '../lib/locationType'
 import PinModal from '../components/PinModal'
+import { isPinStillValid, markPinVerified } from '../lib/pin'
 
 export default function Checkout() {
   const navigate = useNavigate()
@@ -262,7 +263,7 @@ export default function Checkout() {
       setError('Aguarde um instante e confirme de novo.')
       return
     }
-    if (pinRequired && !pinOk) {
+    if (pinRequired && !pinOk && !isPinStillValid(tableNumber as number)) {
       setPinOpen(true)
       return
     }
@@ -716,7 +717,11 @@ export default function Checkout() {
           tableNumber={tableNumber as number}
           openedAt={openedAt}
           onCancel={() => setPinOpen(false)}
-          onConfirm={() => { setPinOpen(false); handleSubmit(true) }}
+          onConfirm={() => {
+            markPinVerified(tableNumber as number)
+            setPinOpen(false)
+            handleSubmit(true)
+          }}
         />
       )}
 
