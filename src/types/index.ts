@@ -146,6 +146,8 @@ export interface Product {
   suggestionCategory?: string
   customSuggestions?: string[]
   productOffer?: Offer
+  chargesPackaging?: boolean
+  packagings?: Array<{ _id: string; name: string; price: number }>
   /** `{ en: { name, description }, es: {...} }` — pode vir `[]` se nunca traduzido */
   translations?: unknown
 }
@@ -184,6 +186,7 @@ export interface Branch {
   phone: string
   settingsTotem: Record<string, unknown>
   settingsWeb?: {
+    voiceOrderEnabled?: boolean
     simpleAuth?: string
     businessHours?: Array<{ open: string; close: string; label: string }>
     metaPixelId?: string
@@ -400,6 +403,8 @@ export interface CartItem {
   note: string
   addedComplements: CartComplement[]
   subTotal: number
+  /** Soma das embalagens cadastradas diretamente no produto, por unidade. */
+  assignedPackagingPrice?: number
 }
 
 // ─── Payload do pedido ─────────────────────────────────────────────────────────

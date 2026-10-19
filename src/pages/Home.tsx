@@ -19,6 +19,10 @@ import ImageWithFallback from '../components/ImageWithFallback'
 import type { Product } from '../types'
 import { getProductStatus } from '../lib/stock'
 import { getCardPrice, formatCurrency as fc } from '../lib/pricing'
+import { useAudioRecorder } from '../hooks/useAudioRecorder'
+import { startVoiceSession, uploadVoiceAudio, confirmVoiceReview, type VoiceReview } from '../services/voiceOrderApi'
+import VoiceOrderReviewModal from '../components/VoiceOrder/VoiceOrderReviewModal'
+import { prepareVoiceCartItems } from '../lib/voiceOrder'
 
 // ─── Busca sem acento ─────────────────────────────────────────────────────────
 
@@ -57,17 +61,24 @@ function Highlight({ text, query }: { text: string; query: string }) {
 }
 
 export default function Home() {
-  const { branch, company, categories, periods, params, loading } = useAppStore()
+  const { branch, company, categories, products, periods, params, loading } = useAppStore()
   const {
     items, totalWithCoupon, itemCount, whereConsume,
     clearCart, setWhereConsumeAsked, setBannersSeen,
   } = useCartStore()
   const [activeCat, setActiveCat] = useState<string>('')
+  const [catMenuOpen, setCatMenuOpen] = useState(false)
+  const headerRef = useRef<HTMLDivElement>(null)
+  const catMenuRef = useRef<HTMLDivElement>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [cartOpen, setCartOpen] = useState(false)
   const [cartPop, setCartPop] = useState(false)
   const [waiterCooldown, setWaiterCooldown] = useState(false)
   const [confirmRestart, setConfirmRestart] = useState(false)
+  const [voiceToken, setVoiceToken] = useState('')
+  const [voiceReview, setVoiceReview] = useState<VoiceReview | null>(null)
+  const [voiceBusy, setVoiceBusy] = useState(false)
+  const recorder = useAudioRecorder()
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const navigate = useNavigate()
   const tr = useContentTranslator()
@@ -75,6 +86,35 @@ export default function Home() {
   const count = itemCount()
   const cartTotal = totalWithCoupon()
   const isMesa = params?.mode === 'mesa'
+  const voiceEnabled = branch?.settingsWeb?.voiceOrderEnabled === true && whereConsume === 'OnLocal'
+
+  const handleVoice = async () => {
+    if (!params || voiceBusy) return
+    setVoiceBusy(true)
+    try {
+      if (!recorder.recording) {
+        const token = await startVoiceSession(params.branchId)
+        setVoiceToken(token)
+        await recorder.start()
+      } else {
+        const audio = await recorder.stop()
+        if (audio.size > 5 * 1024 * 1024) throw new Error('Áudio muito longo')
+        setVoiceReview(await uploadVoiceAudio(voiceToken, audio))
+      }
+    } catch {
+      toast.error('Pedido por voz indisponível. Você pode pedir pelo cardápio.')
+    } finally { setVoiceBusy(false) }
+  }
+
+  const addVoiceReview = async (review: VoiceReview) => {
+    const result = await confirmVoiceReview(voiceToken, review.review_id)
+    if (result.status === 'changed' && result.review) { setVoiceReview(result.review); return }
+    if (result.status !== 'confirmed' || !result.items) throw new Error('Revisão inválida')
+    const prepared = prepareVoiceCartItems(result.items, products, periods)
+    for (const item of prepared) useCartStore.getState().addItem(item.product, item.complements, item.note, item.quantity)
+    setVoiceReview(null)
+    toast.success('Itens adicionados ao carrinho. Confira antes de finalizar.')
+  }
 
   /**
    * Chamar garçom vem **desligado** por padrão.
@@ -100,17 +140,55 @@ export default function Home() {
     if (categories.length > 0 && !activeCat) setActiveCat(categories[0]._id)
   }, [categories])
 
-  /** Troca a categoria exibida. Uma categoria por vez — o grid é substituído,
-   *  não acumulado, e a lista volta ao topo. */
+  /** Todas as categorias numa tela só, cada uma sob o seu cabeçalho. Categoria
+   *  sem item disponível agora não vira seção (nem entra na lista do combo). */
+  const sections = categories
+    .map((cat) => ({ cat, products: filterProductsForDisplay(cat.products, periods) }))
+    .filter((sec) => sec.products.length > 0)
+
+  /** Rola suave até a seção. O `scrollMarginTop` da seção desconta o header fixo. */
   const selectCategory = (id: string) => {
+    setCatMenuOpen(false)
     setActiveCat(id)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    document.getElementById(`cat-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   const currentCat = categories.find((c) => c._id === activeCat) ?? null
-  const visibleProducts = currentCat
-    ? filterProductsForDisplay(currentCat.products, periods)
-    : []
+
+  // Mantém o combo apontando para a seção que está na tela enquanto o cliente rola
+  useEffect(() => {
+    if (searchQuery || sections.length === 0) return
+    let raf = 0
+    const onScroll = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const line = (headerRef.current?.offsetHeight ?? 0) + 24
+        let current = sections[0].cat._id
+        for (const { cat } of sections) {
+          const el = document.getElementById(`cat-${cat._id}`)
+          if (el && el.getBoundingClientRect().top <= line) current = cat._id
+        }
+        setActiveCat(current)
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf) }
+  }, [sections.map((sec) => sec.cat._id).join(','), searchQuery])
+
+  // Fecha o combo ao clicar fora ou apertar Esc
+  useEffect(() => {
+    if (!catMenuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!catMenuRef.current?.contains(e.target as Node)) setCatMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCatMenuOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [catMenuOpen])
 
   // Track busca com debounce
   useEffect(() => {
@@ -178,7 +256,7 @@ export default function Home() {
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-page)', paddingBottom: 'calc(140px + env(safe-area-inset-bottom, 0px))' }}>
       {/* Header sticky */}
-      <div className="sticky top-0 z-20 shadow-sm" style={{ background: 'var(--bg-card)' }}>
+      <div ref={headerRef} className="sticky top-0 z-20 shadow-sm" style={{ background: 'var(--bg-card)' }}>
         <div className="max-w-6xl mx-auto w-full px-4 pt-3 pb-2 flex items-center gap-3">
           {/* Recomeçar: volta ao carrossel / consumo / idioma */}
           <HeaderButton icon="back" onClick={handleRestart} label="Recomeçar" emphasis />
@@ -218,6 +296,16 @@ export default function Home() {
           )}
         </div>
 
+        {voiceEnabled && (
+          <div className="max-w-6xl mx-auto w-full px-4 pb-2">
+            <button onClick={handleVoice} disabled={voiceBusy} className="w-full text-sm font-semibold px-3 py-2 rounded-xl border"
+              style={{ color: 'var(--color-brand)', borderColor: 'var(--color-brand)' }}
+              aria-label={recorder.recording ? 'Parar gravação e revisar pedido' : 'Pedir por voz'}>
+              {voiceBusy ? 'Processando pedido por voz...' : recorder.recording ? 'Parar gravação e revisar' : '🎙 Fazer pedido por voz'}
+            </button>
+          </div>
+        )}
+
         {/*
           Busca sempre visível. Atrás de um botão de lupa ela era invisível para
           quem não procura por ícone — e o botão ainda disputava espaço com o
@@ -248,39 +336,76 @@ export default function Home() {
           )}
         </div>
 
-        {/* Tabs de categoria */}
+        {/* Combo de categorias: lista todas e rola suave até a escolhida */}
         {!searchQuery && (
-          loading ? <CategoryTabsSkeleton /> : (
-            <div className="max-w-6xl mx-auto w-full flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
-              {categories.map(cat => {
-                const active = activeCat === cat._id
-                return (
-                  <button
-                    key={cat._id}
-                    onClick={() => selectCategory(cat._id)}
-                    className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-semibold rounded-full border transition-colors py-1 ${
-                      /* com foto o padding da esquerda encolhe para a imagem
-                         encostar na borda do pill */
-                      cat.image ? 'pl-1 pr-3' : 'px-3 py-1.5'
-                    }`}
-                    style={active
-                      ? { backgroundColor: 'var(--color-brand)', color: '#fff', borderColor: 'var(--color-brand)' }
-                      : { background: 'var(--bg-card)', color: 'var(--text-lo)', borderColor: 'var(--border)' }
-                    }
-                  >
-                    {cat.image && (
-                      <ImageWithFallback
-                        src={cat.image}
-                        // Nome no alt para o fallback conseguir mostrar a inicial
-                        alt={tr.name(cat)}
-                        className="w-6 h-6 rounded-full object-cover flex-shrink-0"
-                        skeletonClassName="w-6 h-6 rounded-full"
-                      />
-                    )}
-                    {tr.name(cat)}
-                  </button>
-                )
-              })}
+          loading ? <CategoryTabsSkeleton /> : sections.length > 0 && (
+            <div ref={catMenuRef} className="max-w-6xl mx-auto w-full px-4 pb-3 relative">
+              <button
+                type="button"
+                onClick={() => setCatMenuOpen((o) => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={catMenuOpen}
+                className="w-full flex items-center gap-2 text-sm font-semibold rounded-xl border px-3 py-2.5 text-left"
+                style={{ background: 'var(--bg-card)', color: 'var(--text-hi)', borderColor: 'var(--border)' }}
+              >
+                <span className="text-xs font-medium" style={{ color: 'var(--text-lo)' }}>Categoria</span>
+                <span className="flex-1 truncate" style={{ color: 'var(--color-brand)' }}>
+                  {currentCat ? tr.name(currentCat) : 'Escolher'}
+                </span>
+                <span
+                  className="text-xs transition-transform"
+                  style={{ color: 'var(--text-lo)', transform: catMenuOpen ? 'rotate(180deg)' : 'none' }}
+                  aria-hidden
+                >
+                  ▾
+                </span>
+              </button>
+
+              {catMenuOpen && (
+                <div
+                  role="listbox"
+                  className="absolute left-4 right-4 top-full -mt-1 z-30 rounded-2xl border shadow-xl overflow-y-auto"
+                  style={{ background: 'var(--bg-card)', borderColor: 'var(--border)', maxHeight: '60vh' }}
+                >
+                  {sections.map(({ cat, products: list }) => {
+                    const active = activeCat === cat._id
+                    return (
+                      <button
+                        key={cat._id}
+                        role="option"
+                        aria-selected={active}
+                        onClick={() => selectCategory(cat._id)}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-left border-b last:border-b-0"
+                        style={{
+                          borderColor: 'var(--divider)',
+                          background: active ? 'var(--color-brand-light)' : 'transparent',
+                        }}
+                      >
+                        {cat.image && (
+                          <ImageWithFallback
+                            src={cat.image}
+                            alt={tr.name(cat)}
+                            className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
+                            skeletonClassName="w-8 h-8 rounded-lg"
+                          />
+                        )}
+                        <span
+                          className="flex-1 min-w-0 truncate text-sm font-semibold"
+                          style={{ color: active ? 'var(--color-brand)' : 'var(--text-hi)' }}
+                        >
+                          {tr.name(cat)}
+                        </span>
+                        <span
+                          className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                          style={{ background: 'var(--color-brand-light)', color: 'var(--color-brand)' }}
+                        >
+                          {list.length} {list.length === 1 ? 'item' : 'itens'}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         )}
@@ -308,35 +433,40 @@ export default function Home() {
         </div>
       )}
 
-      {/* Somente a categoria selecionada */}
+      {/* Todas as categorias, uma sob a outra, separadas só por cabeçalho */}
       {!searchQuery && (
-        loading ? <MenuSkeleton /> : currentCat && (
-          <div className="max-w-6xl mx-auto w-full px-4 pt-4">
-            <div className="flex items-center gap-2 mb-3">
-              {currentCat.image && (
-                <ImageWithFallback src={currentCat.image} alt={currentCat.name}
-                  className="w-7 h-7 rounded-lg object-cover flex-shrink-0" />
-              )}
-              <h2 className="text-sm font-bold" style={{ color: 'var(--text-hi)' }}>{tr.name(currentCat)}</h2>
-              <span
-                className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
-                style={{ background: 'var(--color-brand-light)', color: 'var(--color-brand)' }}
-              >
-                {visibleProducts.length} {visibleProducts.length === 1 ? 'item' : 'itens'}
-              </span>
-            </div>
-
-            {visibleProducts.length === 0 ? (
+        loading ? <MenuSkeleton /> : (
+          <div className="max-w-6xl mx-auto w-full px-4 pt-4 flex flex-col gap-8">
+            {sections.length === 0 && (
               <p className="text-sm text-center py-12" style={{ color: 'var(--text-lo)' }}>
-                Nenhum item disponível em {currentCat.name} agora.
+                Nenhum item disponível agora.
               </p>
-            ) : (
-              /* key na categoria: força remontar o grid ao trocar de aba, em vez
-                 de o React reaproveitar os cards da categoria anterior */
-              <div key={currentCat._id} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-                {visibleProducts.map(p => <ProductCard key={p._id} product={p} />)}
-              </div>
             )}
+            {sections.map(({ cat, products: list }) => (
+              <section
+                key={cat._id}
+                id={`cat-${cat._id}`}
+                // Desconta o header fixo (e o combo) ao rolar até a seção
+                style={{ scrollMarginTop: (headerRef.current?.offsetHeight ?? 150) + 8 }}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  {cat.image && (
+                    <ImageWithFallback src={cat.image} alt={cat.name}
+                      className="w-7 h-7 rounded-lg object-cover flex-shrink-0" />
+                  )}
+                  <h2 className="text-sm font-bold" style={{ color: 'var(--text-hi)' }}>{tr.name(cat)}</h2>
+                  <span
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                    style={{ background: 'var(--color-brand-light)', color: 'var(--color-brand)' }}
+                  >
+                    {list.length} {list.length === 1 ? 'item' : 'itens'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
+                  {list.map(p => <ProductCard key={p._id} product={p} />)}
+                </div>
+              </section>
+            ))}
           </div>
         )
       )}
@@ -363,6 +493,9 @@ export default function Home() {
       )}
 
       <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} />
+      {recorder.expired && !voiceReview && <p role="alert" className="fixed bottom-20 left-4 bg-white p-3 rounded-xl z-30">Gravação encerrada após 30 segundos. Tente novamente.</p>}
+      {voiceReview && <VoiceOrderReviewModal key={voiceReview.review_id} token={voiceToken} initialReview={voiceReview}
+        products={categories.flatMap(category => category.products)} onClose={() => setVoiceReview(null)} onConfirm={addVoiceReview} />}
 
       <ConfirmModal
         open={confirmRestart}

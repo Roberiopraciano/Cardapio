@@ -5,6 +5,8 @@ import { useAppStore } from '../store/appStore'
 import { api, OrderError } from '../api/client'
 import { formatCurrency, calcCartItemSubtotal, calcPackagingTotal, calcTmProduto } from '../lib/pricing'
 import { checkBranchOpen } from '../lib/businessPeriod'
+import { isOutOfStock, checkValidPeriod } from '../lib/stock'
+import { parsePeriod } from '../lib/dataLinker'
 import ImageWithFallback from '../components/ImageWithFallback'
 import HeaderButton from '../components/HeaderButton'
 import Icon from '../components/Icon'
@@ -323,6 +325,49 @@ export default function Checkout() {
     } catch (e) {
       // Só registra: o POST adiante decide
       console.warn('[pedido] não foi possível reverificar se a loja está aberta', e)
+    }
+
+    // Confere o catálogo no instante do envio, inclusive itens já no carrinho.
+    // O servidor repete a validação para evitar mudanças entre esta leitura e o POST.
+    try {
+      const branchId = params?.branchId ?? ''
+      const [productsResponse, periodsResponse] = await Promise.all([
+        api.getProducts(branchId), api.getPeriods(branchId),
+      ])
+      const freshProducts = new Map((productsResponse.data as Record<string, unknown>[])
+        .map((product) => [String(product['_id']), product]))
+      const freshPeriods = (periodsResponse.data as Record<string, unknown>[]).map(parsePeriod)
+      for (const item of items) {
+        const product = freshProducts.get(item.product._id)
+        if (!product || product['active'] === false || isOutOfStock(product as { stock?: typeof item.product.stock })
+          || (product['relatedPeriod'] && !checkValidPeriod(freshPeriods, String(product['relatedPeriod'])))) {
+          throw new Error(`${item.product.name} não está disponível agora. Atualize o cardápio.`)
+        }
+        if (Math.abs(Number(product['price']) - item.product.price) > 0.009) {
+          throw new Error(`O preço de ${item.product.name} mudou. Atualize o cardápio.`)
+        }
+        if (whereConsume === 'OutsideLocal') {
+          const packagings = Array.isArray(product['packagings'])
+            ? product['packagings'] as Array<{ price: number }> : []
+          const currentPackagingPrice = product['chargesPackaging'] === true
+            ? packagings.reduce((sum, packaging) => sum + Number(packaging.price), 0) : 0
+          if (Math.abs(currentPackagingPrice - (item.assignedPackagingPrice ?? 0)) > 0.009) {
+            throw new Error(`A embalagem de ${item.product.name} mudou. Atualize o cardápio.`)
+          }
+        }
+        for (const complement of item.addedComplements.filter((c) => !c.isPackaging)) {
+          const fresh = freshProducts.get(complement._id)
+          if (!fresh || fresh['active'] === false || isOutOfStock(fresh as { stock?: typeof item.product.stock })
+            || (fresh['relatedPeriod'] && !checkValidPeriod(freshPeriods, String(fresh['relatedPeriod'])))) {
+            throw new Error(`${complement.name} não está disponível agora. Atualize o cardápio.`)
+          }
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error && e.message.includes('Atualize o cardápio')
+        ? e.message : 'Não foi possível validar os produtos agora. Tente novamente.'
+      setError(msg); toast.error(msg); setLoading(false)
+      return
     }
 
     try {

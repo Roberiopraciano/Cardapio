@@ -237,7 +237,7 @@ export function calcUnitPrice(product: Product, comps: CartComplement[]): number
 }
 
 export function calcCartItemSubtotal(item: CartItem): number {
-  return calcUnitPrice(item.product, item.addedComplements) * item.quantity
+  return (calcUnitPrice(item.product, item.addedComplements) + (item.assignedPackagingPrice ?? 0)) * item.quantity
 }
 
 export function calcCartTotal(items: CartItem[]): number {
@@ -251,7 +251,7 @@ export function calcPackagingTotal(items: CartItem[]): number {
       .filter((complement) => complement.isPackaging === true)
       .reduce((total, complement) => total + complementPrice(complement), 0)
 
-    return cartTotal + (itemPackaging * item.quantity)
+    return cartTotal + ((itemPackaging + (item.assignedPackagingPrice ?? 0)) * item.quantity)
   }, 0)
 }
 

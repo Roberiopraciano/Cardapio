@@ -57,6 +57,7 @@ function devProxy(env: Record<string, string>): Record<string, ProxyOptions> | u
 
   return {
     ...(local ? { '/api/totem-handoffs': { target: local, changeOrigin: true } } : {}),
+    ...(local ? { '/api/v1/voice-order': { target: local, changeOrigin: true } } : {}),
     '/api': { target: remote, changeOrigin: true },
   }
 }

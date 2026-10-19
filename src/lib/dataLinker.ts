@@ -114,6 +114,9 @@ export function parseProduct(
     suggestionCategory: (raw['suggestionCategory'] as string) ?? 'global',
     customSuggestions: (raw['customSuggestions'] as string[]) ?? [],
     productOffer: undefined,
+    chargesPackaging: raw['chargesPackaging'] === true,
+    packagings: Array.isArray(raw['packagings'])
+      ? (raw['packagings'] as Array<{ _id: string; name: string; price: number }>) : [],
     // `{ en: {...}, es: {...} }` — mas chega como `[]` em item nunca traduzido
     translations: raw['translations'],
   }

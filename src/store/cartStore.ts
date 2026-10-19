@@ -77,14 +77,16 @@ function injectPackaging(item: CartItem): CartItem {
       }
     }
   }
-  const updated = { ...item, addedComplements: comps }
+  const assignedPackagingPrice = item.product.chargesPackaging
+    ? (item.product.packagings ?? []).reduce((sum, packaging) => sum + packaging.price, 0) : 0
+  const updated = { ...item, addedComplements: comps, assignedPackagingPrice }
   return { ...updated, subTotal: calcCartItemSubtotal(updated) }
 }
 
 /** Espelho de Product.removeTakeawayPackaging() */
 function removePackaging(item: CartItem): CartItem {
   const comps = item.addedComplements.filter((c) => !c.isPackaging)
-  const updated = { ...item, addedComplements: comps }
+  const updated = { ...item, addedComplements: comps, assignedPackagingPrice: 0 }
   return { ...updated, subTotal: calcCartItemSubtotal(updated) }
 }
 
