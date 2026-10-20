@@ -4,7 +4,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { confirmVoiceReview, startVoiceSession, updateVoiceReview, uploadVoiceAudio } from '../services/voiceOrderApi'
+import {
+  confirmVoiceReview, replyVoiceConversation, startVoiceConversation, startVoiceSession, updateVoiceReview, uploadVoiceAudio,
+} from '../services/voiceOrderApi'
 
 const fetchMock = vi.fn()
 
@@ -107,5 +109,50 @@ describe('confirmVoiceReview', () => {
   it.each(['REVIEW_HAS_PENDING_ITEMS', 'INVALID_REVIEW'])('lança %s (409)', async (code) => {
     fetchMock.mockReturnValue(reply({ success: false, code }, 409))
     await expect(confirmVoiceReview('tok', 'r1')).rejects.toThrow(code)
+  })
+})
+
+describe('startVoiceConversation', () => {
+  it('começa por texto, em JSON, com o token só no header', async () => {
+    fetchMock.mockReturnValue(reply({ success: true, data: { conversation_id: 'c1', status: 'needs_input' } }))
+    const result = await startVoiceConversation('tok', { text: 'quero um x-bacon' })
+    expect(result.conversation_id).toBe('c1')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toMatch(/\/api\/v1\/voice-order\/conversation$/)
+    expect(init.headers.Authorization).toBe('Bearer tok')
+    expect(init.headers['Content-Type']).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ text: 'quero um x-bacon' })
+  })
+
+  it('começa por áudio, em multipart', async () => {
+    fetchMock.mockReturnValue(reply({ success: true, data: { conversation_id: 'c2' } }))
+    await startVoiceConversation('tok', { audio: new Blob(['abc'], { type: 'audio/webm' }) })
+    const init = fetchMock.mock.calls[0][1]
+    expect(init.body).toBeInstanceOf(FormData)
+    expect((init.body as FormData).get('audio')).toBeInstanceOf(Blob)
+    expect(init.headers['Content-Type']).toBeUndefined()
+  })
+
+  it.each([[429, 'QUOTA_EXCEEDED'], [503, 'VOICE_ORDER_UNAVAILABLE'], [422, 'INVALID_AUDIO']])('propaga o código %i %s', async (status, code) => {
+    fetchMock.mockReturnValue(reply({ success: false, code }, status))
+    await expect(startVoiceConversation('tok', { text: 'oi' })).rejects.toThrow(code)
+  })
+})
+
+describe('replyVoiceConversation', () => {
+  it('envia as respostas (índice da opção) e a mensagem livre para a conversa certa', async () => {
+    fetchMock.mockReturnValue(reply({ success: true, data: { conversation_id: 'c1', status: 'ready' } }))
+    const answers = [{ question_id: 'q1_1', option_index: 2 }, { question_id: 'q1_2', declined: true }]
+    expect((await replyVoiceConversation('tok', 'c1', { answers, text: 'e uma batata' })).status).toBe('ready')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toMatch(/\/api\/v1\/voice-order\/conversation\/c1\/reply$/)
+    expect(JSON.parse(init.body)).toEqual({ answers, text: 'e uma batata' })
+  })
+
+  it('lança quando a conversa venceu ou o servidor está ocupado', async () => {
+    fetchMock.mockReturnValue(reply({ success: false, code: 'INVALID_CONVERSATION' }, 404))
+    await expect(replyVoiceConversation('tok', 'c1', { text: 'oi' })).rejects.toThrow('INVALID_CONVERSATION')
+    fetchMock.mockReturnValue(reply({ success: false, code: 'CONVERSATION_BUSY' }, 409))
+    await expect(replyVoiceConversation('tok', 'c1', { text: 'oi' })).rejects.toThrow('CONVERSATION_BUSY')
   })
 })

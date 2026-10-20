@@ -3,12 +3,20 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 const MAX_RECORDING_MS = 30_000
 const MIME_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
 
-export function useAudioRecorder() {
+/**
+ * Grava áudio do microfone, com limite de 30 s.
+ *
+ * `onAutoStop` recebe a gravação quando o limite é atingido, para o chamador enviar o que foi
+ * dito em vez de descartar (o cliente não precisa regravar por ter falado até o fim).
+ */
+export function useAudioRecorder(onAutoStop?: (audio: Blob) => void) {
   const recorder = useRef<MediaRecorder | null>(null)
   const stream = useRef<MediaStream | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [recording, setRecording] = useState(false)
   const [expired, setExpired] = useState(false)
+  const autoStop = useRef(onAutoStop)
+  useEffect(() => { autoStop.current = onAutoStop }, [onAutoStop])
 
   const stop = useCallback((): Promise<Blob> => new Promise((resolve, reject) => {
     const current = recorder.current
@@ -39,7 +47,7 @@ export function useAudioRecorder() {
       recorder.current = current
       current.start()
       setRecording(true)
-      timer.current = setTimeout(() => { if (current.state !== 'inactive') stop().then(() => setExpired(true)).catch(() => setExpired(true)) }, MAX_RECORDING_MS)
+      timer.current = setTimeout(() => { if (current.state !== 'inactive') stop().then(audio => { setExpired(true); autoStop.current?.(audio) }).catch(() => setExpired(true)) }, MAX_RECORDING_MS)
     } catch (error) {
       media.getTracks().forEach(track => track.stop())
       throw error

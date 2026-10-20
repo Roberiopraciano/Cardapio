@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { lazy, Suspense, useRef, useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
 import { useCartStore } from '../store/cartStore'
@@ -19,9 +19,8 @@ import ImageWithFallback from '../components/ImageWithFallback'
 import type { Product } from '../types'
 import { getProductStatus } from '../lib/stock'
 import { getCardPrice, formatCurrency as fc } from '../lib/pricing'
-import { useAudioRecorder } from '../hooks/useAudioRecorder'
-import { startVoiceSession, uploadVoiceAudio, confirmVoiceReview, type VoiceReview } from '../services/voiceOrderApi'
-import VoiceOrderReviewModal from '../components/VoiceOrder/VoiceOrderReviewModal'
+import type { VoiceItem } from '../services/voiceOrderApi'
+import AiStarIcon from '../components/VoiceOrder/AiStarIcon'
 import { prepareVoiceCartItems } from '../lib/voiceOrder'
 
 // ─── Busca sem acento ─────────────────────────────────────────────────────────
@@ -60,6 +59,9 @@ function Highlight({ text, query }: { text: string; query: string }) {
   )
 }
 
+/** O assistente de pedido (texto/voz) só baixa quando o cliente toca no botão. */
+const VoiceOrderAssistant = lazy(() => import('../components/VoiceOrder/VoiceOrderAssistant'))
+
 export default function Home() {
   const { branch, company, categories, products, periods, params, loading } = useAppStore()
   const {
@@ -75,10 +77,7 @@ export default function Home() {
   const [cartPop, setCartPop] = useState(false)
   const [waiterCooldown, setWaiterCooldown] = useState(false)
   const [confirmRestart, setConfirmRestart] = useState(false)
-  const [voiceToken, setVoiceToken] = useState('')
-  const [voiceReview, setVoiceReview] = useState<VoiceReview | null>(null)
-  const [voiceBusy, setVoiceBusy] = useState(false)
-  const recorder = useAudioRecorder()
+  const [voiceOpen, setVoiceOpen] = useState(false)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const navigate = useNavigate()
   const tr = useContentTranslator()
@@ -88,31 +87,10 @@ export default function Home() {
   const isMesa = params?.mode === 'mesa'
   const voiceEnabled = branch?.settingsWeb?.voiceOrderEnabled === true && whereConsume === 'OnLocal'
 
-  const handleVoice = async () => {
-    if (!params || voiceBusy) return
-    setVoiceBusy(true)
-    try {
-      if (!recorder.recording) {
-        const token = await startVoiceSession(params.branchId)
-        setVoiceToken(token)
-        await recorder.start()
-      } else {
-        const audio = await recorder.stop()
-        if (audio.size > 5 * 1024 * 1024) throw new Error('Áudio muito longo')
-        setVoiceReview(await uploadVoiceAudio(voiceToken, audio))
-      }
-    } catch {
-      toast.error('Pedido por voz indisponível. Você pode pedir pelo cardápio.')
-    } finally { setVoiceBusy(false) }
-  }
-
-  const addVoiceReview = async (review: VoiceReview) => {
-    const result = await confirmVoiceReview(voiceToken, review.review_id)
-    if (result.status === 'changed' && result.review) { setVoiceReview(result.review); return }
-    if (result.status !== 'confirmed' || !result.items) throw new Error('Revisão inválida')
-    const prepared = prepareVoiceCartItems(result.items, products, periods)
+  /** Itens que o servidor confirmou no assistente de pedido. Lança (e nada entra no carrinho) se o cardápio local mudou. */
+  const addVoiceItems = (voiceItems: VoiceItem[]) => {
+    const prepared = prepareVoiceCartItems(voiceItems, products, periods)
     for (const item of prepared) useCartStore.getState().addItem(item.product, item.complements, item.note, item.quantity)
-    setVoiceReview(null)
     toast.success('Itens adicionados ao carrinho. Confira antes de finalizar.')
   }
 
@@ -295,16 +273,6 @@ export default function Home() {
             />
           )}
         </div>
-
-        {voiceEnabled && (
-          <div className="max-w-6xl mx-auto w-full px-4 pb-2">
-            <button onClick={handleVoice} disabled={voiceBusy} className="w-full text-sm font-semibold px-3 py-2 rounded-xl border"
-              style={{ color: 'var(--color-brand)', borderColor: 'var(--color-brand)' }}
-              aria-label={recorder.recording ? 'Parar gravação e revisar pedido' : 'Pedir por voz'}>
-              {voiceBusy ? 'Processando pedido por voz...' : recorder.recording ? 'Parar gravação e revisar' : '🎙 Fazer pedido por voz'}
-            </button>
-          </div>
-        )}
 
         {/*
           Busca sempre visível. Atrás de um botão de lupa ela era invisível para
@@ -492,10 +460,37 @@ export default function Home() {
         </div>
       )}
 
+      {/*
+        Assistente de pedido (IA): botão redondo no canto inferior direito, alinhado à coluna do conteúdo.
+        Sobe acima da barra "Ver carrinho" quando ela está na tela, para os dois nunca se cobrirem.
+      */}
+      {voiceEnabled && !voiceOpen && !cartOpen && (
+        <div className="fixed left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-xl z-20 flex justify-end pointer-events-none"
+          style={{ bottom: `calc(${count > 0 ? 132 : 72}px + env(safe-area-inset-bottom, 0px))` }}>
+          <button
+            type="button"
+            onClick={() => setVoiceOpen(true)}
+            aria-label="Pedir com a IA, falando ou escrevendo"
+            title="Pedir com a IA"
+            className="pointer-events-auto w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl active:scale-95 transition-transform voice-focus"
+            style={{ backgroundColor: 'var(--color-brand)' }}
+          >
+            <AiStarIcon size={26} />
+          </button>
+        </div>
+      )}
+
       <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} />
-      {recorder.expired && !voiceReview && <p role="alert" className="fixed bottom-20 left-4 bg-white p-3 rounded-xl z-30">Gravação encerrada após 30 segundos. Tente novamente.</p>}
-      {voiceReview && <VoiceOrderReviewModal key={voiceReview.review_id} token={voiceToken} initialReview={voiceReview}
-        products={categories.flatMap(category => category.products)} onClose={() => setVoiceReview(null)} onConfirm={addVoiceReview} />}
+      {voiceOpen && params && (
+        <Suspense fallback={null}>
+          <VoiceOrderAssistant
+            branchId={params.branchId}
+            products={products}
+            onAdd={addVoiceItems}
+            onClose={() => setVoiceOpen(false)}
+          />
+        </Suspense>
+      )}
 
       <ConfirmModal
         open={confirmRestart}

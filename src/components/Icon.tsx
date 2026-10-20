@@ -8,6 +8,7 @@ import {
   faMinus, faPlus, faCheck, faClock, faTag, faMobileScreenButton,
   faUserTie, faHandsPraying, faFire, faTruckFast, faLanguage,
   faTrash, faPen, faCircleInfo, faTriangleExclamation, faHourglassHalf,
+  faMicrophone, faPaperPlane,
 } from '@fortawesome/free-solid-svg-icons'
 
 /**
@@ -53,6 +54,8 @@ export const ICONS = {
   info: faCircleInfo,
   warning: faTriangleExclamation,
   waiting: faHourglassHalf,
+  mic: faMicrophone,
+  send: faPaperPlane,
 } as const
 
 export type IconName = keyof typeof ICONS

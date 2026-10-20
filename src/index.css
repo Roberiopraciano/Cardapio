@@ -113,3 +113,22 @@ body { margin: 0; }
 .text-hi  { color: var(--text-hi); }
 .text-lo  { color: var(--text-lo); }
 .border-c { border-color: var(--border); }
+
+/* ── Assistente de pedido (texto/voz) ── */
+.voice-focus:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+@keyframes voice-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--color-brand-light); }
+  100% { box-shadow: 0 0 0 18px transparent; }
+}
+@keyframes voice-dot {
+  0%, 80%, 100% { opacity: .25; transform: translateY(0); }
+  40%           { opacity: 1;   transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .voice-pulse { animation: voice-pulse 1.3s ease-out infinite; }
+  .voice-dot   { animation: voice-dot 1.2s ease-in-out infinite; }
+  .voice-dot:nth-child(2) { animation-delay: .15s; }
+  .voice-dot:nth-child(3) { animation-delay: .3s; }
+  .voice-sheet { animation: slide-up .28s ease-out; }
+  .voice-rise  { animation: fade-in .25s ease-out; }
+}

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Product } from '../../types'
 import type { ProposedVoiceItem, VoiceReview } from '../../services/voiceOrderApi'
 import { updateVoiceReview } from '../../services/voiceOrderApi'
+import { buildPendingChoices } from '../../lib/voiceOrder'
 
 interface Props {
   token: string
@@ -20,11 +21,8 @@ export default function VoiceOrderReviewModal({ token, initialReview, products, 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [dirty, setDirty] = useState(false)
-  const pending = [
-    ...review.items_not_found.map((label, index) => ({ ref: `missing:${index}`, label })),
-    ...review.ambiguous_items.map((label, index) => ({ ref: `ambiguous:${index}`, label })),
-    ...review.invalid_items.map(item => ({ ref: item.client_item_ref, label: item.code })),
-  ]
+  const [showAll, setShowAll] = useState<ReadonlySet<string>>(new Set())
+  const pending = buildPendingChoices(review, products, showAll)
 
   const edit = (index: number, change: Partial<ProposedVoiceItem>) => {
     setItems(old => old.map((item, i) => i === index ? { ...item, ...change } : item))
@@ -78,7 +76,9 @@ export default function VoiceOrderReviewModal({ token, initialReview, products, 
           </section>
         })}
         {pending.map(entry => <label key={entry.ref} className="block text-sm text-amber-800 bg-amber-50 p-3 rounded-xl">
-          Escolha o produto para “{entry.label}”
+          {entry.kind === 'invalid'
+            ? <span className="block font-semibold mb-1">{entry.label} Quer pedir outro?</span>
+            : <>Escolha o produto para “{entry.label}”</>}
           <select className="block border rounded p-2 w-full mt-2" value={items.find(item => item.client_item_ref === entry.ref)?.product_id ?? ''}
             onChange={event => {
               const productId = event.target.value
@@ -89,9 +89,11 @@ export default function VoiceOrderReviewModal({ token, initialReview, products, 
               })
               setDirty(true)
             }}>
-            <option value="">Selecione no cardápio</option>
-            {products.filter(product => product.active).map(product => <option key={product._id} value={product._id}>{product.name}</option>)}
+            <option value="">{entry.narrowed ? 'Selecione uma das opções' : 'Selecione no cardápio'}</option>
+            {entry.options.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
           </select>
+          {entry.narrowed && <button type="button" className="mt-2 underline text-xs"
+            onClick={() => setShowAll(old => new Set(old).add(entry.ref))}>Nenhuma dessas — ver o cardápio todo</button>}
         </label>)}
         <p className="font-bold">{blocked ? 'Total disponível após resolver pendências' : `Total estimado: R$ ${(review.totals.total_minor / 100).toFixed(2).replace('.', ',')}`}</p>
         {error && <p role="alert" className="text-red-700 text-sm">{error}</p>}

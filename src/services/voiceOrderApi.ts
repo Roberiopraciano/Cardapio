@@ -7,6 +7,8 @@ export interface VoiceItem {
   preparation_note: string
   selected_options: Record<string, string[]>
   display: { name: string }
+  /** Opções escolhidas (bebida, adicional...) já com o preço calculado pelo servidor. */
+  options?: Array<{ group_id: string; product_id: string; display_name: string; price_minor: number }>
   validation_status: 'valid' | 'missing_options'
   missing_required_group_ids: string[]
   subtotal_minor: number
@@ -15,10 +17,21 @@ export interface VoiceItem {
 export interface VoiceReview {
   review_id: string
   items: VoiceItem[]
-  invalid_items: Array<{ client_item_ref: string; code: string }>
+  invalid_items: Array<{
+    client_item_ref: string
+    code: string
+    /** Frase pronta para o cliente ("Tem “X”, mas está em falta no momento."). */
+    message?: string
+    display_name?: string
+    /** Produtos parecidos que podem ser pedidos agora, no lugar do recusado. */
+    alternatives?: Array<{ product_id: string; display_name: string }>
+    available_quantity?: number
+  }>
   missing_required_selections: Array<{ client_item_ref: string; group_id: string }>
   items_not_found: string[]
   ambiguous_items: string[]
+  /** Produtos parecidos de cada item ambíguo, na mesma ordem de ambiguous_items. */
+  ambiguous_candidates?: Array<Array<{ product_id: string; display_name: string }>>
   totals: { currency: string; subtotal_minor: number; total_minor: number }
   expires_at: string
 }
@@ -63,5 +76,65 @@ export async function updateVoiceReview(token: string, reviewId: string, items: 
 
 export async function confirmVoiceReview(token: string, reviewId: string): Promise<{ status: string; items?: VoiceItem[]; review?: VoiceReview }> {
   const json = await post<{ data: { status: string; items?: VoiceItem[]; review?: VoiceReview } }>('/confirm', JSON.stringify({ review_id: reviewId }), token)
+  return json.data
+}
+
+// ─── Conversa de pedido (texto ou voz) ────────────────────────────────────────
+
+export type ConversationStatus = 'needs_input' | 'suggesting' | 'ready' | 'incomplete' | 'empty'
+
+export interface VoiceQuestion {
+  id: string
+  /** choice = o servidor precisa da resposta; suggestion = sugestão de opcional, pode ser recusada */
+  kind: 'choice' | 'suggestion'
+  question: string
+  options: string[]
+  optional: boolean
+}
+
+export interface VoiceChatMessage {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+export interface VoiceConversation {
+  conversation_id: string
+  status: ConversationStatus
+  /** true quando o pedido já pode ir para o carrinho (sugestões pendentes são opcionais) */
+  can_confirm: boolean
+  review: VoiceReview
+  questions: VoiceQuestion[]
+  notes: string[]
+  chat: VoiceChatMessage[]
+  turns_left: number
+}
+
+export interface VoiceAnswer {
+  question_id: string
+  /** posição da opção tocada; o servidor resolve o texto, não confia no navegador */
+  option_index?: number
+  text?: string
+  declined?: boolean
+}
+
+/** Começa a conversa com um texto digitado ou com um áudio gravado. */
+export async function startVoiceConversation(token: string, input: { text: string } | { audio: Blob }): Promise<VoiceConversation> {
+  let body: BodyInit
+  if ('audio' in input) {
+    const form = new FormData()
+    form.append('audio', input.audio, 'order.webm')
+    body = form
+  } else {
+    body = JSON.stringify({ text: input.text })
+  }
+  const json = await post<{ data: VoiceConversation }>('/conversation', body, token)
+  return json.data
+}
+
+/** Responde às perguntas da rodada e/ou acrescenta algo ao pedido. */
+export async function replyVoiceConversation(
+  token: string, conversationId: string, reply: { answers?: VoiceAnswer[]; text?: string },
+): Promise<VoiceConversation> {
+  const json = await post<{ data: VoiceConversation }>(`/conversation/${conversationId}/reply`, JSON.stringify(reply), token)
   return json.data
 }
