@@ -10,6 +10,7 @@ import {
   effectivePrice,
   hasDiscount,
   discountAmount,
+  discountPercent,
   cheapestInGroup,
   getFractionText,
   getFractionalSubLabel,
@@ -296,7 +297,25 @@ describe('getCardPrice', () => {
 
 // ─── effectivePrice ──────────────────────────────────────────────────────────
 
+describe('discountPercent', () => {
+  it('R$12,90 por R$9,99 → 23%', () => {
+    const p = makeProduct({ price: 12.9, offerprice: 9.99, complementsGroups: [] })
+    expect(discountPercent(p)).toBe(23)
+  })
+
+  it('sem desconto ou preço zero → 0', () => {
+    expect(discountPercent(makeProduct({ price: 20, complementsGroups: [] }))).toBe(0)
+    expect(discountPercent(makeProduct({ price: 0, complementsGroups: [] }))).toBe(0)
+  })
+})
+
 describe('effectivePrice', () => {
+  it('offerprice null (API sem promoção) → retorna price', () => {
+    const p = makeProduct({ price: 20, offerprice: null as unknown as undefined, complementsGroups: [] })
+    expect(effectivePrice(p)).toBe(20)
+    expect(hasDiscount(p)).toBe(false)
+  })
+
   it('sem offer → retorna price', () => {
     const p = makeProduct({ price: 25 })
     expect(effectivePrice(p)).toBeCloseTo(25)

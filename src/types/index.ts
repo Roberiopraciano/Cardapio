@@ -148,6 +148,8 @@ export interface Product {
   productOffer?: Offer
   chargesPackaging?: boolean
   packagings?: Array<{ _id: string; name: string; price: number }>
+  /** Nomes dos insumos que compõem o produto ("Leite", "Pão") — só vem quando cadastrados */
+  composition?: string[]
   /** `{ en: { name, description }, es: {...} }` — pode vir `[]` se nunca traduzido */
   translations?: unknown
 }

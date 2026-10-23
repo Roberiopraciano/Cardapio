@@ -5,7 +5,7 @@ import { useCartStore, buildCartComplements, cartComplementsToSelectedByGroup } 
 import ComplementGroup from '../components/ComplementGroup'
 import ImageWithFallback from '../components/ImageWithFallback'
 import {
-  formatCurrency, effectivePrice, hasDiscount, discountAmount,
+  formatCurrency, effectivePrice, hasDiscount, discountPercent,
   getCardPrice, calcUnitPrice,
 } from '../lib/pricing'
 import { getProductStatus, getStatusBadge, getPeriodLabel, isOutOfStock } from '../lib/stock'
@@ -165,7 +165,7 @@ export default function ProductDetail() {
   const orderable = status === 'available'
   const periodLabel = getPeriodLabel(product, periods)
   const showDiscount = hasDiscount(product)
-  const discount = discountAmount(product)
+  const discount = discountPercent(product)
 
   // Frações totais por grupo
   const fracTotals: Record<string, number> = {}
@@ -348,6 +348,14 @@ export default function ProductDetail() {
           </p>
         )}
 
+        {/* Composição: insumos que levam o produto */}
+        {product.composition && product.composition.length > 0 && (
+          <p className="text-xs mt-2" style={{ color: 'var(--text-lo)' }}>
+            <span className="font-semibold">Composição: </span>
+            {product.composition.join(', ')}
+          </p>
+        )}
+
         {/* Período disponível */}
         {periodLabel && (
           <div className="flex items-center gap-1.5 mt-2">
@@ -368,12 +376,12 @@ export default function ProductDetail() {
               {formatCurrency(product.price ?? 0)}
             </span>
           )}
-          <span className="text-xl font-bold" style={{ color: 'var(--color-brand)' }}>
+          <span className={`${showDiscount ? 'text-2xl' : 'text-xl'} font-bold`} style={{ color: showDiscount ? '#059669' : 'var(--color-brand)' }}>
             {formatCurrency(unitSubtotal)}
           </span>
           {showDiscount && extrasTotal === 0 && (
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600">
-              −{formatCurrency(discount)}
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+              −{discount}%
               {product.productOffer?.title ? ` (${product.productOffer.title})` : ''}
             </span>
           )}

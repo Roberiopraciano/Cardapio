@@ -152,6 +152,8 @@ const PT: Dict = {
   'error.retry': 'Tentar novamente',
   'common.close': 'Fechar',
   'common.cancel': 'Cancelar',
+  'product.composition': 'Composição',
+  'product.compositionInfo': 'Ver composição',
 }
 
 const ES: Dict = {
@@ -235,6 +237,8 @@ const ES: Dict = {
   'error.retry': 'Intentar de nuevo',
   'common.close': 'Cerrar',
   'common.cancel': 'Cancelar',
+  'product.composition': 'Composición',
+  'product.compositionInfo': 'Ver composición',
 }
 
 const EN: Dict = {
@@ -318,6 +322,8 @@ const EN: Dict = {
   'error.retry': 'Try again',
   'common.close': 'Close',
   'common.cancel': 'Cancel',
+  'product.composition': 'Ingredients',
+  'product.compositionInfo': 'View ingredients',
 }
 
 const DICTS: Record<Lang, Dict> = { pt: PT, es: ES, en: EN }

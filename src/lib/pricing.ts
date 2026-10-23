@@ -45,7 +45,7 @@ export function applyOffer(basePrice: number, offer: Offer | undefined): number 
 
 /** Preço efetivo do produto (offerprice > productOffer > price) */
 export function effectivePrice(product: Product): number {
-  if (product.offerprice !== undefined && product.offerprice < (product.price ?? 0)) {
+  if (typeof product.offerprice === 'number' && product.offerprice < (product.price ?? 0)) {
     return product.offerprice
   }
   if (product.productOffer) {
@@ -57,6 +57,13 @@ export function effectivePrice(product: Product): number {
 /** Desconto em reais para exibição */
 export function discountAmount(product: Product): number {
   return (product.price ?? 0) - effectivePrice(product)
+}
+
+/** Desconto em % do preço cheio, arredondado (R$12,90 → R$9,99 = 23%) */
+export function discountPercent(product: Product): number {
+  const base = product.price ?? 0
+  if (base <= 0) return 0
+  return Math.round((discountAmount(product) / base) * 100)
 }
 
 export function hasDiscount(product: Product): boolean {

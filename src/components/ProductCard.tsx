@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Product } from '../types'
 import { getCardPrice, formatCurrency, effectivePrice, hasDiscount } from '../lib/pricing'
@@ -5,11 +6,16 @@ import { getProductStatus, getStatusBadge, getPeriodLabel } from '../lib/stock'
 import ImageWithFallback from './ImageWithFallback'
 import { useAppStore } from '../store/appStore'
 import { useContentTranslator } from '../lib/useTranslatedContent'
+import { useLangStore } from '../store/langStore'
+import CompositionSheet from './CompositionSheet'
 
 export default function ProductCard({ product }: { product: Product }) {
   const navigate = useNavigate()
   const { periods } = useAppStore()
   const tr = useContentTranslator()
+  const { t } = useLangStore()
+  const [showComposition, setShowComposition] = useState(false)
+  const composition = product.composition ?? []
   const name = tr.name(product)
   const description = tr.description(product)
   const status = getProductStatus(product, periods)
@@ -20,6 +26,7 @@ export default function ProductCard({ product }: { product: Product }) {
   const periodLabel = getPeriodLabel(product, periods)
 
   return (
+    <>
     <button
       onClick={() => orderable && navigate(`/produto/${product._id}`)}
       disabled={!orderable}
@@ -48,9 +55,29 @@ export default function ProductCard({ product }: { product: Product }) {
           </div>
         )}
 
+        {/* (i) composição — só aparece quando há insumos cadastrados. O card inteiro
+            é um <button>, então o ícone é um span com role=button: botão dentro de
+            botão é HTML inválido. stopPropagation evita abrir o produto. */}
+        {composition.length > 0 && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={t('product.compositionInfo')}
+            title={t('product.compositionInfo')}
+            onClick={(e) => { e.stopPropagation(); setShowComposition(true) }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setShowComposition(true) }
+            }}
+            className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold italic cursor-pointer"
+            style={{ background: 'rgba(255,255,255,.92)', color: '#374151', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }}
+          >
+            i
+          </span>
+        )}
+
         <div className="absolute top-2 left-2 flex flex-col gap-1">
           {hasOffer && orderable && (
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-500 text-white">Oferta</span>
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white">Oferta</span>
           )}
         </div>
       </div>
@@ -82,7 +109,7 @@ export default function ProductCard({ product }: { product: Product }) {
               sugeria um mínimo teórico que ele nunca veria, e o número menor
               que aparecia dentro do produto virava contradição.
             */}
-            <p className="text-sm font-bold" style={{ color: orderable ? 'var(--color-brand)' : 'var(--text-lo)' }}>
+            <p className={`${hasOffer ? 'text-base' : 'text-sm'} font-bold`} style={{ color: !orderable ? 'var(--text-lo)' : hasOffer ? '#059669' : 'var(--color-brand)' }}>
               {formatCurrency(displayPrice)}
             </p>
           </div>
@@ -93,5 +120,13 @@ export default function ProductCard({ product }: { product: Product }) {
         </div>
       </div>
     </button>
+    {showComposition && (
+      <CompositionSheet
+        title={name}
+        items={composition}
+        onClose={() => setShowComposition(false)}
+      />
+    )}
+    </>
   )
 }
