@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   adoptClientOrderId, buildMesaItems, classifyMesa, clearMesaSession, erpCode, getMesaClientOrderId,
-  billItemTotal, cancelledItems, groupEntries, billOriginLabel, billPersonLabel, isStaffItem, buildPersonColors, flattenBill, groupBill, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
+  billItemTotal, cancelledItems, groupEntries, billOriginLabel, billPersonLabel, isStaffItem, buildPersonColors, flattenBill, groupBill, isBillItemCancelled, groupIdenticalItems, buildBillTree, cancelledTotal, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
 } from '../lib/mesaErp'
 import type { CartItem, Product } from '../types'
 
@@ -379,5 +379,74 @@ describe('itens cancelados não somem', () => {
 
   it('o total continua sem os cancelados', () => {
     expect(groupBill(itens, 'pessoa')).toEqual([{ key: 'Ana', label: 'Ana', count: 1, total: 40 }])
+  })
+})
+
+describe('isBillItemCancelled', () => {
+  it('aceita cancelado em true, 1 e "1"', () => {
+    expect(isBillItemCancelled({ cancelado: true })).toBe(true)
+    expect(isBillItemCancelled({ cancelado: 1 })).toBe(true)
+    expect(isBillItemCancelled({ cancelado: '1' })).toBe(true)
+    expect(isBillItemCancelled({ cancelado: false })).toBe(false)
+    expect(isBillItemCancelled({ cancelado: 0 })).toBe(false)
+    expect(isBillItemCancelled({})).toBe(false)
+  })
+
+  it('VIT_CANCEL = 1 só vale com VIT_DHCANCEL preenchido', () => {
+    expect(isBillItemCancelled({ VIT_CANCEL: 1, VIT_DHCANCEL: '2026-10-28T20:10:00' })).toBe(true)
+    expect(isBillItemCancelled({ VIT_CANCEL: 1, VIT_DHCANCEL: null })).toBe(false)
+    expect(isBillItemCancelled({ VIT_CANCEL: 0, VIT_DHCANCEL: '2026-10-28T20:10:00' })).toBe(false)
+  })
+})
+
+describe('groupIdenticalItems', () => {
+  const raw = (id: number, hora: string, extra: Record<string, unknown> = {}) => ({
+    id, codigoProduto: 10, descricao: 'Delicia 1', quantidade: 1, valorUnitario: 36, valorTotal: 36,
+    nomeCliente: 'Cleberson', horaLancamento: hora, cancelado: false, ...extra,
+  })
+
+  it('junta lançamentos iguais: 4x de R$ 36 viram 4x R$ 144', () => {
+    const out = groupIdenticalItems(buildBillTree([raw(1, '19:19'), raw(2, '19:20'), raw(3, '19:55'), raw(4, '20:16')]))
+    expect(out).toHaveLength(1)
+    expect(out[0].quantidade).toBe(4)
+    expect(out[0].valorTotal).toBe(144)
+    expect(out[0].horaLancamento).toBe('19:19 a 20:16')
+  })
+
+  it('não junta pessoas, observações ou cancelados diferentes', () => {
+    const itens = buildBillTree([
+      raw(1, '19:00'), raw(2, '19:01', { nomeCliente: 'Outra' }),
+      raw(3, '19:02', { observacao: 'sem cebola' }), raw(4, '19:03', { cancelado: true }),
+    ])
+    expect(groupIdenticalItems(itens)).toHaveLength(4)
+  })
+
+  it('soma também os complementos, que precisam ser iguais', () => {
+    const kid = { id: 9, codigoProduto: 5, descricao: 'Bacon', quantidade: 1, valorUnitario: 3, valorTotal: 3 }
+    const two = groupIdenticalItems(buildBillTree([
+      raw(1, '19:00', { complements: [kid] }), raw(2, '19:05', { complements: [{ ...kid, id: 10 }] }),
+    ]))
+    expect(two).toHaveLength(1)
+    expect(two[0].filhos[0].quantidade).toBe(2)
+    expect(two[0].filhos[0].valorTotal).toBe(6)
+    expect(groupIdenticalItems(buildBillTree([raw(1, '19:00', { complements: [kid] }), raw(2, '19:05')]))).toHaveLength(2)
+  })
+})
+
+describe('cancelledTotal', () => {
+  const item = (id: number, valorTotal: number, extra: Record<string, unknown> = {}) =>
+    ({ id, codigoProduto: id, descricao: `P${id}`, quantidade: 1, valorUnitario: valorTotal, valorTotal, ...extra })
+
+  it('soma só o que foi cancelado, sem contar filho duas vezes', () => {
+    const itens = buildBillTree([
+      item(1, 10),
+      item(2, 20, { cancelado: true, complements: [item(21, 5, { cancelado: true })] }),
+      item(3, 30, { complements: [item(31, 4, { cancelado: true })] }),
+    ])
+    expect(cancelledTotal(itens)).toBe(20 + 5 + 4)
+  })
+
+  it('sem cancelados é zero', () => {
+    expect(cancelledTotal(buildBillTree([item(1, 10)]))).toBe(0)
   })
 })

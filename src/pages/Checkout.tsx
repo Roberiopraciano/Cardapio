@@ -1230,12 +1230,6 @@ export default function Checkout() {
                   <span style={{ color: 'var(--text-lo)' }}>{formatCurrency(packagingTotal)}</span>
                 </div>
               )}
-              {deliverToAddress && neighborhoods.length > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span style={{ color: 'var(--text-lo)' }}>Taxa de entrega</span>
-                  <span style={{ color: 'var(--text-lo)' }}>{deliveryFee > 0 ? formatCurrency(deliveryFee) : 'Grátis'}</span>
-                </div>
-              )}
             </div>
           </>
         )}
@@ -1258,6 +1252,11 @@ export default function Checkout() {
           <span className="font-semibold" style={{ color: 'var(--text-hi)' }}>Total</span>
           <span className="text-lg font-bold" style={{ color: 'var(--text-hi)' }}>{formatCurrency(finalTotal)}</span>
         </div>
+        {deliverToAddress && neighborhoods.length > 0 && (
+          <p className="text-xs text-right -mt-2 mb-2.5" style={{ color: 'var(--text-lo)' }}>
+            Taxa de Entrega: {deliveryFee > 0 ? formatCurrency(deliveryFee) : 'Grátis'}
+          </p>
+        )}
         <button onClick={handleContinue} disabled={loading}
           className="w-full py-4 rounded-xl text-white font-bold text-sm uppercase disabled:opacity-60 active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
           style={{ backgroundColor: 'var(--color-brand)' }}>

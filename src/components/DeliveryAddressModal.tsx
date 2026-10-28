@@ -5,7 +5,6 @@ import {
   type DeliveryAddress, type Neighborhood, EMPTY_ADDRESS, UFS, CepNotFoundError,
   cepDigits, maskCep, lookupCep, missingAddressFields, matchNeighborhood,
 } from '../lib/deliveryAddress'
-import { formatCurrency } from '../lib/pricing'
 
 /** Montado só enquanto aberto: o estado nasce do `initial` a cada abertura. */
 interface Props {
@@ -160,9 +159,7 @@ export default function DeliveryAddressModal({ initial, neighborhoods, onClose, 
                     }}>
                     <option value="">Selecione o bairro</option>
                     {neighborhoods.map((n) => (
-                      <option key={n._id} value={n._id}>
-                        {n.name}{n.fee > 0 ? ` — taxa ${formatCurrency(n.fee)}` : ' — entrega grátis'}
-                      </option>
+                      <option key={n._id} value={n._id}>{n.name}</option>
                     ))}
                   </select>
                 </div>

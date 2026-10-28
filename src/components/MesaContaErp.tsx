@@ -6,7 +6,7 @@ import { useCartStore } from '../store/cartStore'
 import { formatCurrency } from '../lib/pricing'
 import { formatQuantity } from '../lib/billFormat'
 import {
-  BILL_STATUS_LABEL, billItemTotal, cancelledItems, billOriginLabel, billPersonLabel, buildPersonColors, clearMesaSession, flattenBill, groupBill,
+  BILL_STATUS_LABEL, billItemTotal, cancelledItems, billOriginLabel, billPersonLabel, buildPersonColors, clearMesaSession, flattenBill, groupBill, groupIdenticalItems, cancelledTotal,
   groupEntries, loadMesaSession, mesaErrorMessage, parseMesaBill, STAFF_PILL, type MesaBill, type MesaBillItem, type PillColor,
 } from '../lib/mesaErp'
 import HeaderButton from './HeaderButton'
@@ -46,6 +46,17 @@ export default function MesaContaErp({ branchId, table, tableName }: {
   const [error, setError] = useState<string | null>(null)
   const [noSession, setNoSession] = useState(false)
   const [view, setView] = useState<View>('itens')
+  // Agrupar lançamentos iguais vem ligado; a escolha fica no aparelho
+  const [grouped, setGrouped] = useState(() => {
+    try { return localStorage.getItem('cardapio.billGrouped') !== '0' } catch { return true }
+  })
+  // Mostrar só os itens cancelados
+  const [onlyCancelled, setOnlyCancelled] = useState(false)
+  const toggleGrouped = () => {
+    const next = !grouped
+    setGrouped(next)
+    try { localStorage.setItem('cardapio.billGrouped', next ? '1' : '0') } catch { /* sem storage */ }
+  }
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
   const [detail, setDetail] = useState<MesaBillItem | null>(null)
   const closeDetail = useCallback(() => setDetail(null), [])
@@ -93,6 +104,9 @@ export default function MesaContaErp({ branchId, table, tableName }: {
   const colorOf = (label: string): PillColor => colors.get(label) ?? STAFF_PILL
   const active = bill?.itens.filter((i) => !i.cancelado) ?? []
   const cancelados = cancelledItems(bill?.itens ?? [])
+  const cancelledSum = cancelledTotal(bill?.itens ?? [])
+  const baseList = onlyCancelled ? cancelledItems(bill?.itens ?? []) : (bill?.itens ?? [])
+  const listed = grouped ? groupIdenticalItems(baseList) : baseList
   const groups = bill && view !== 'itens' ? groupBill(bill.itens, view) : []
   const closed = !!bill && bill.status !== 'ABERTA'
   const isMe = (name: string | null) => !!name && !!clientName.trim() && name.trim().toLowerCase() === clientName.trim().toLowerCase()
@@ -172,9 +186,26 @@ export default function MesaContaErp({ branchId, table, tableName }: {
           </div>
 
           <div className="mx-4 mt-3 rounded-2xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            {view === 'itens' && bill.itens.length > 0 && (
+              <label className="flex items-center gap-2 px-4 py-2.5 border-b text-xs font-semibold cursor-pointer"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-lo)' }}>
+                <input type="checkbox" checked={grouped} onChange={toggleGrouped} className="w-4 h-4" />
+                Aparecer agrupado
+              </label>
+            )}
+            {view === 'itens' && cancelados.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b text-xs font-semibold"
+                style={{ borderColor: 'var(--border)' }}>
+                <label className="flex items-center gap-2 cursor-pointer" style={{ color: 'var(--text-lo)' }}>
+                  <input type="checkbox" checked={onlyCancelled} onChange={() => setOnlyCancelled((v) => !v)} className="w-4 h-4" />
+                  Só cancelados ({cancelados.length})
+                </label>
+                <span style={{ color: '#b91c1c' }}>Total cancelado: {formatCurrency(cancelledSum)}</span>
+              </div>
+            )}
             {view === 'itens' && (bill.itens.length === 0
               ? <Empty text={bill.offline ? 'Itens indisponíveis sem conexão com a loja.' : 'Nenhum item lançado ainda.'} />
-              : bill.itens.map((i) => (
+              : listed.map((i) => (
                 <ItemTree key={i.id} item={i} colorOf={colorOf} isMe={isMe} onDetail={setDetail} />
               )))}
 
@@ -204,7 +235,7 @@ export default function MesaContaErp({ branchId, table, tableName }: {
           {view !== 'itens' && cancelados.length > 0 && (
             <div className="mx-4 mt-3 rounded-2xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
               <p className="px-4 pt-3 text-xs font-semibold uppercase tracking-wide" style={{ color: '#b91c1c' }}>
-                {cancelados.length === 1 ? '1 item cancelado' : `${cancelados.length} itens cancelados`} · não entram na conta
+                {cancelados.length === 1 ? '1 item cancelado' : `${cancelados.length} itens cancelados`} · {formatCurrency(cancelledSum)} · não entram na conta
               </p>
               {cancelados.map((i) => (
                 <div key={i.id} className="px-4 py-2.5 flex justify-between gap-3 text-sm" style={{ opacity: 0.7 }}>

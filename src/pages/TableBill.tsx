@@ -249,7 +249,8 @@ export default function TableBill() {
   useEffect(() => { load() }, [load])
 
   // Conta desligada pela branch: a rota existe, mas não entrega nada
-  const billEnabled = branch?.settingsWeb?.billEnabled !== false
+  // A conta é só da mesa: balcão e delivery não têm esta tela
+  const billEnabled = isMesa && branch?.settingsWeb?.billEnabled !== false
   useEffect(() => {
     if (!billEnabled) navigate('/', { replace: true })
   }, [billEnabled])

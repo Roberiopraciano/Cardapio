@@ -263,6 +263,18 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? 
 type Rec = Record<string, unknown>
 const rec = (v: unknown): Rec => (v && typeof v === 'object' ? (v as Rec) : {})
 
+/**
+ * Item cancelado: `cancelado` verdadeiro (true, 1, "1", "S") ou, se o serviço mandar
+ * as colunas do ERP, `VIT_CANCEL = 1` com `VIT_DHCANCEL` preenchido.
+ */
+export function isBillItemCancelled(i: Rec): boolean {
+  const truthy = (v: unknown) => v === true || v === 1 || (typeof v === 'string' && ['1', 's', 'true'].includes(v.trim().toLowerCase()))
+  if (truthy(i['cancelado'])) return true
+  const flag = i['VIT_CANCEL'] ?? i['vitCancel']
+  const when = i['VIT_DHCANCEL'] ?? i['vitDhcancel'] ?? i['dhCancelamento']
+  return truthy(flag) && when != null && String(when).trim() !== ''
+}
+
 function parseBillItem(i: Rec, idx: number): MesaBillItem {
   return {
     id: (i['id'] as number | string | undefined) ?? idx,
@@ -274,7 +286,7 @@ function parseBillItem(i: Rec, idx: number): MesaBillItem {
     valorTotal: num(i['valorTotal'] ?? i['total']),
     observacao: str(i['observacao']) ?? str(i['note']),
     horaLancamento: str(i['horaLancamento']),
-    cancelado: i['cancelado'] === true,
+    cancelado: isBillItemCancelled(i),
     nomeCliente: str(i['nomeCliente']),
     quemLancou: str(i['quemLancou']),
     origem: str(i['origem']),
@@ -307,6 +319,61 @@ export function buildBillTree(raw: Rec[]): MesaBillItem[] {
     else top.push(r)
   }
   return top
+}
+
+/** Mesmo produto, mesma pessoa, mesma observação, mesmo preço e mesmos complementos. */
+function groupKey(i: MesaBillItem): string {
+  const kids = i.filhos.map((k) => [k.codigoProduto, k.descricao, k.quantidade, k.valorUnitario, k.observacao, k.cancelado].join('~'))
+  return [
+    i.codigoProduto, i.descricao, i.valorUnitario, i.observacao, i.cancelado,
+    i.nomeCliente, i.quemLancou, i.origem, ...kids,
+  ].join('|')
+}
+
+/**
+ * Junta lançamentos idênticos ("1× Delícia" quatro vezes vira "4× Delícia").
+ * Cancelado nunca se mistura com ativo e a ordem da primeira aparição é mantida.
+ * Os complementos, que são iguais por construção, têm quantidade e valor somados;
+ * o horário vira a faixa do primeiro ao último lançamento.
+ */
+export function groupIdenticalItems(itens: MesaBillItem[]): MesaBillItem[] {
+  const groups = new Map<string, MesaBillItem[]>()
+  for (const i of itens) {
+    const key = groupKey(i)
+    const list = groups.get(key)
+    if (list) list.push(i)
+    else groups.set(key, [i])
+  }
+  return [...groups.values()].map((list) => {
+    if (list.length === 1) return list[0]
+    const first = list[0]
+    const sorted = list.map((x) => x.horaLancamento).filter((h): h is string => !!h).sort()
+    return {
+      ...first,
+      quantidade: list.reduce((a, x) => a + x.quantidade, 0),
+      valorTotal: list.reduce((a, x) => a + x.valorTotal, 0),
+      horaLancamento: sorted.length === 0 ? null
+        : sorted[0] === sorted[sorted.length - 1] ? sorted[0] : `${sorted[0]} a ${sorted[sorted.length - 1]}`,
+      filhos: first.filhos.map((k, idx) => ({
+        ...k,
+        quantidade: list.reduce((a, x) => a + x.filhos[idx].quantidade, 0),
+        valorTotal: list.reduce((a, x) => a + x.filhos[idx].valorTotal, 0),
+      })),
+    }
+  })
+}
+
+/**
+ * Valor dos itens cancelados (o que saiu da conta). O item cancelado leva o que está
+ * dentro dele; filho cancelado de pai ativo conta sozinho; nada é somado duas vezes.
+ */
+export function cancelledTotal(itens: MesaBillItem[], parentCancelled = false): number {
+  const sumAll = (i: MesaBillItem): number => i.valorTotal + i.filhos.reduce((a, k) => a + sumAll(k), 0)
+  return itens.reduce((acc, i) => {
+    if (parentCancelled) return acc
+    if (i.cancelado) return acc + sumAll(i)
+    return acc + cancelledTotal(i.filhos)
+  }, 0)
 }
 
 /** Todos os itens, pais e filhos, em ordem. Filho de item cancelado também conta como cancelado. */

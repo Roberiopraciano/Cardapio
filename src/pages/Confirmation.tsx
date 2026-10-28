@@ -137,12 +137,14 @@ export default function Confirmation() {
         </button>
 
         {/* Conta da mesa */}
-        <button
-          onClick={() => navigate('/conta')}
-          className="w-full py-3 rounded-xl font-medium text-sm border"
-          style={{ borderColor: 'var(--border)', color: 'var(--text-hi)', background: 'var(--bg-card)' }}>
-          🧾 Ver a conta
-        </button>
+        {mode === 'mesa' && (
+          <button
+            onClick={() => navigate('/conta')}
+            className="w-full py-3 rounded-xl font-medium text-sm border"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-hi)', background: 'var(--bg-card)' }}>
+            🧾 Ver a conta
+          </button>
+        )}
 
         {/* Ver pedido / voltar */}
         <button
