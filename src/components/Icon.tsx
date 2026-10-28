@@ -9,6 +9,8 @@ import {
   faUserTie, faHandsPraying, faFire, faTruckFast, faLanguage,
   faTrash, faPen, faCircleInfo, faTriangleExclamation, faHourglassHalf,
   faMicrophone, faPaperPlane, faVolumeHigh, faVolumeXmark,
+  faLocationDot, faMotorcycle, faPersonWalking, faMoneyBill1, faCreditCard,
+  faChevronRight, faTicket, faCashRegister, faGlobe,
 } from '@fortawesome/free-solid-svg-icons'
 
 /**
@@ -58,6 +60,15 @@ export const ICONS = {
   send: faPaperPlane,
   speaker: faVolumeHigh,
   muted: faVolumeXmark,
+  location: faLocationDot,
+  motorcycle: faMotorcycle,
+  walking: faPersonWalking,
+  cash: faMoneyBill1,
+  creditCard: faCreditCard,
+  chevronRight: faChevronRight,
+  coupon: faTicket,
+  register: faCashRegister,
+  online: faGlobe,
 } as const
 
 export type IconName = keyof typeof ICONS

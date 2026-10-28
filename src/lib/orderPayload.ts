@@ -21,6 +21,7 @@
 import type { CartItem, CartComplement, Offer, WhereConsume } from '../types'
 import { calcCartItemSubtotal } from './pricing'
 import { locationTypeFor } from './locationType'
+import { type DeliveryAddress, formatAddress } from './deliveryAddress'
 
 /** Versão do app (package.json), no campo que o totem usa para a versão dele. */
 export const CARDAPIO_VERSION: string = __APP_VERSION__
@@ -52,6 +53,8 @@ export interface OrderPayloadInput {
   payment?: { key: string; label: string; prepaid: boolean; pdvCode?: string }
   tmProduto?: number
   coupon?: Offer | null
+  /** Delivery com entrega no endereço; ausente = retirada (ou não é delivery). */
+  deliveryAddress?: DeliveryAddress | null
   /** UUID do envio: o mesmo em cada retentativa, para o backend não duplicar o pedido. */
   clientOrderId?: string
 }
@@ -93,10 +96,13 @@ export function flattenComplement(c: CartComplement): FlatComplement {
 
 export function buildOrderPayload(i: OrderPayloadInput) {
   const localLabel = i.mode === 'mesa' ? 'Pagar na mesa'
-    : i.mode === 'delivery' ? 'Pagar na retirada' : 'Pagar no balcão'
+    : i.mode === 'delivery' ? (i.deliveryAddress ? 'Pagar na entrega' : 'Pagar na retirada') : 'Pagar no balcão'
   const label = i.payVia === 'totem' ? 'Pagar no totem' : localLabel
   const email = i.askEmail ? i.client.email?.trim() : ''
   const comanda = i.comanda?.trim()
+  // O PDV ainda não lê `deliveryAddress`: na observação o endereço chega à loja
+  const deliveryLine = i.deliveryAddress ? `ENTREGA: ${formatAddress(i.deliveryAddress)}` : ''
+  const note = [deliveryLine, i.note?.trim()].filter(Boolean).join('\n')
 
   return {
     branch: i.branchId,
@@ -124,7 +130,8 @@ export function buildOrderPayload(i: OrderPayloadInput) {
     cpfCustomer: i.client.cpf.replace(/\D/g, '') || null,
     totemNF_email: email || null,
     ...(comanda ? { comanda } : {}),
-    note: i.note?.trim() || null,
+    note: note || null,
+    ...(i.deliveryAddress ? { deliveryAddress: { ...i.deliveryAddress, formatted: formatAddress(i.deliveryAddress) } } : {}),
     // O cardápio não cobra: `prepaid` só vem da API, pela forma escolhida.
     // Sem escolha, e no totem, é `false` — é o que impede a máquina de pular a cobrança
     paymentMethod: {

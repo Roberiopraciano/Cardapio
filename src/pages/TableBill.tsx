@@ -15,6 +15,8 @@ import HeaderButton from '../components/HeaderButton'
 import Icon from '../components/Icon'
 import type { IconName } from '../components/Icon'
 import QrScanner from '../components/QrScanner'
+import MesaContaErp from '../components/MesaContaErp'
+import { tableLabel } from '../lib/tableLabel'
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Aguardando cozinha',
@@ -203,7 +205,11 @@ export default function TableBill() {
   // Em mesa o código é o nome da mesa e vem da URL mesmo sem carrinho aberto.
   const code = isMesa ? (params?.table ?? '') : consumptioncode
 
+  // Mesa integrada ao ERP: a conta vem do PDV (ver MesaContaErp), nao de api/orders
+  const mesaErp = isMesa && branch?.settingsWeb?.mesaErpEnabled === true
+
   const load = useCallback(async () => {
+    if (mesaErp) { setLoading(false); return }
     // Mock ligado: nem chega a consultar a API. Ver src/lib/mockBill.ts
     if (MOCK_BILL) {
       const now = Date.now()
@@ -235,7 +241,7 @@ export default function TableBill() {
     } finally {
       setLoading(false)
     }
-  }, [code, params?.branchId, branch])
+  }, [code, params?.branchId, branch, mesaErp])
 
   // Recupera nome/telefone salvos para saber quais pedidos são meus
   useEffect(() => { loadSavedClient() }, [])
@@ -377,6 +383,10 @@ export default function TableBill() {
         onDone={() => setIdentified(true)}
       />
     )
+  }
+
+  if (mesaErp) {
+    return <MesaContaErp branchId={params?.branchId ?? ''} table={code} tableName={tableLabel(code) || 'mesa'} />
   }
 
   return (

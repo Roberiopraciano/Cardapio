@@ -505,6 +505,10 @@ export const api = {
   mesaStatus: (p: { branchId: string; clientOrderId: string; numeroMesa?: number }) =>
     mesaCall<Record<string, unknown>>('status', p),
 
+  /** Mesa já aberta (garçom/PDV/outro aparelho): entra na mesma comanda, sem PIN. */
+  mesaEntrar: (p: { branchId: string; clientOrderId: string; numeroMesa: number }) =>
+    mesaCall<{ clientOrderId?: string } & Record<string, unknown>>('entrar', p),
+
   mesaAbrir: (p: { branchId: string; numeroMesa: number; pin: string; nomeCliente?: string }) =>
     mesaCall<{ clientOrderId?: string } & Record<string, unknown>>('abrir', p),
 
@@ -512,6 +516,9 @@ export const api = {
     branchId: string; clientOrderId: string; numeroMesa: number; loteId: string
     nomeCliente?: string; itens: unknown[]
   }, token: string) => mesaCall<Record<string, unknown>>('lancar', p, token),
+
+  mesaConta: (p: { branchId: string; clientOrderId: string; numeroMesa: number }, token: string) =>
+    mesaCall<Record<string, unknown>>('conta', p, token),
 
   mesaLoteStatus: (p: { branchId: string; clientOrderId: string; loteId: string }, token: string) =>
     mesaCall<{ resultado: 'CONFIRMADO' | 'NAO_LANCADO' | 'INDETERMINADO'; podeReenviar: boolean }>('lote-status', p, token),

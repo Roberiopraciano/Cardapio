@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   adoptClientOrderId, buildMesaItems, classifyMesa, clearMesaSession, erpCode, getMesaClientOrderId,
-  loadMesaSession, MesaItemError, mesaErrorMessage, saveMesaSession, SESSION_MAX_AGE_MS,
+  groupBill, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
 } from '../lib/mesaErp'
 import type { CartItem, Product } from '../types'
 
@@ -14,11 +14,11 @@ describe('classifyMesa', () => {
     expect(classifyMesa(undefined, MINE)).toBe('livre')
   })
 
-  it('mesa aberta pelo garçom/PDV (sem clientOrderId) = ocupada: chamar o garçom', () => {
+  it('mesa aberta pelo garçom/PDV (sem clientOrderId) = ocupada: entra na mesma comanda, sem PIN', () => {
     expect(classifyMesa({ encontrada: true, clientOrderId: null, venStatus: 1, podeLancarItens: true }, MINE)).toBe('ocupada')
   })
 
-  it('mesa aberta com outro clientOrderId = ocupada', () => {
+  it('mesa aberta com outro clientOrderId = ocupada (entra na comanda dele)', () => {
     expect(classifyMesa({ encontrada: true, clientOrderId: 'outro', venStatus: 1 }, MINE)).toBe('ocupada')
   })
 
@@ -26,9 +26,10 @@ describe('classifyMesa', () => {
     expect(classifyMesa({ encontrada: true, clientOrderId: MINE.toUpperCase(), venStatus: 1, podeLancarItens: true }, MINE)).toBe('minha')
   })
 
-  it('mesa deste aparelho em pagamento/conferência = bloqueada', () => {
+  it('mesa em pagamento/conferência = bloqueada, seja a comanda deste aparelho ou de outro canal', () => {
     expect(classifyMesa({ encontrada: true, clientOrderId: MINE, venStatus: 3, podeLancarItens: false }, MINE)).toBe('bloqueada')
     expect(classifyMesa({ encontrada: true, clientOrderId: MINE, venStatus: 70 }, MINE)).toBe('bloqueada')
+    expect(classifyMesa({ encontrada: true, clientOrderId: null, venStatus: 3, podeLancarItens: false }, MINE)).toBe('bloqueada')
   })
 })
 
@@ -86,9 +87,10 @@ describe('buildMesaItems', () => {
 
     const [out] = buildMesaItems([item], [burger, bacon, embalagem])
     expect(out.codigoProduto).toBe(171)
+    expect(out.produtoId).toBe('p1') // o Laravel resolve código e preço pelo _id
     expect(out.quantidade).toBe(2)
     expect(out.observacao).toBe('sem cebola')
-    expect(out.complements).toEqual([{ codigoProduto: 88888888, quantidade: 1, valorUnitario: 4.9, observacao: null }])
+    expect(out.complements).toEqual([{ produtoId: 'c1', codigoProduto: 88888888, quantidade: 1, valorUnitario: 4.9, observacao: null }])
   })
 
   it('aplica a fração no preço de referência do complemento (meia pizza)', () => {
@@ -96,7 +98,9 @@ describe('buildMesaItems', () => {
       product: burger, quantity: 1, note: '', subTotal: 0,
       addedComplements: [{ _id: 'c1', name: 'Bacon', price: 10, quantity: 1, groupId: 'g', groupName: 'G', unitFraction: 0.5 }],
     } as CartItem
-    expect(buildMesaItems([item], [burger, bacon])[0].complements?.[0].valorUnitario).toBe(5)
+    const comp = buildMesaItems([item], [burger, bacon])[0].complements?.[0]
+    expect(comp?.valorUnitario).toBe(5)
+    expect(comp?.fracao).toBe(0.5)
   })
 
   it('produto ou complemento sem código do ERP não vai para a loja', () => {
@@ -127,5 +131,63 @@ describe('erpCode e mensagens', () => {
     expect(mesaErrorMessage('PIN_BLOQUEADO')).toMatch(/2 minutos/)
     expect(mesaErrorMessage('XYZ')).toMatch(/garçom/i)
     expect(mesaErrorMessage('XYZ', 'texto do servidor')).toBe('texto do servidor')
+  })
+})
+
+const CONTA = {
+  success: true,
+  data: {
+    statusDescricao: 'ABERTA',
+    garcom: { codigo: 5, nome: 'Marcos Silva' },
+    horaAbertura: '20:15',
+    horaUltimoLancamento: '20:38',
+    totais: { valorProdutos: 128.5, valorServico: 12.85, valorDesconto: 0, valorBruto: 141.35, valorTotalPago: 50, saldoRestante: 91.35 },
+    itens: [
+      { id: 1, codigoProduto: 105, descricao: 'Hambúrguer', categoria: 'Lanches', quantidade: 2, valorTotal: 76, nomeCliente: 'Roberio', cancelado: false },
+      { id: 2, codigoProduto: 88, descricao: 'Batata', categoria: 'Porções', quantidade: 1, valorTotal: 26.5, nomeCliente: 'Ana', cancelado: false },
+      { id: 3, codigoProduto: 201, descricao: 'Refri', categoria: 'Bebidas', quantidade: 2, valorTotal: 26, nomeCliente: null, cancelado: false },
+      { id: 4, codigoProduto: 201, descricao: 'Refri errado', categoria: 'Bebidas', quantidade: 1, valorTotal: 13, nomeCliente: null, cancelado: true },
+    ],
+    pagamentos: [{ id: 9, formaPagamentoNome: 'PIX Dinâmico Nuvem', valor: 50, dataHora: '2026-10-26T20:35:10' }],
+  },
+}
+
+describe('conta da mesa (mesa.conta)', () => {
+  it('normaliza a resposta da loja: totais, itens e pagamentos', () => {
+    const bill = parseMesaBill(CONTA)
+    expect(bill.offline).toBe(false)
+    expect(bill.status).toBe('ABERTA')
+    expect(bill.garcomNome).toBe('Marcos Silva')
+    expect(bill.totais).toEqual({ produtos: 128.5, servico: 12.85, desconto: 0, bruto: 141.35, pago: 50, restante: 91.35 })
+    expect(bill.itens).toHaveLength(4)
+    expect(bill.pagamentos).toEqual([{ id: 9, forma: 'PIX Dinâmico Nuvem', valor: 50, dataHora: '2026-10-26T20:35:10' }])
+  })
+
+  it('agrupa por pessoa (item do PDV = Garçom / Balcão) e por categoria, sem contar cancelado', () => {
+    const { itens } = parseMesaBill(CONTA)
+    expect(groupBill(itens, 'pessoa').map((g) => [g.label, g.total])).toEqual([
+      ['Roberio', 76], ['Ana', 26.5], ['Garçom / Balcão', 26],
+    ])
+    expect(groupBill(itens, 'categoria').map((g) => [g.label, g.count, g.total])).toEqual([
+      ['Lanches', 1, 76], ['Porções', 1, 26.5], ['Bebidas', 1, 26],
+    ])
+  })
+
+  it('espelho offline da nuvem: avisa e usa os totais guardados', () => {
+    const bill = parseMesaBill({
+      success: true, origem: 'CACHE_OFFLINE_MONGODB', aviso: 'Exibindo última sincronização.',
+      dados: { statusMesa: 'ABERTA', garcom: { nome: 'Marcos' }, totais: { subtotal: 100, taxaServico: 10, total: 110, totalPago: 0, saldoPendente: 110 } },
+    })
+    expect(bill.offline).toBe(true)
+    expect(bill.notice).toMatch(/última sincronização/)
+    expect(bill.totais.bruto).toBe(110)
+    expect(bill.itens).toEqual([])
+  })
+
+  it('resposta vazia ou com lixo não quebra a tela', () => {
+    const bill = parseMesaBill({ success: true, data: { itens: 'x', totais: null } })
+    expect(bill.itens).toEqual([])
+    expect(bill.totais.bruto).toBe(0)
+    expect(bill.status).toBe('ABERTA')
   })
 })

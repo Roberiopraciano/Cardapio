@@ -145,3 +145,25 @@ describe('complementEntries — lê o formato antigo e o novo', () => {
     expect(complementEntries({})).toEqual([])
   })
 })
+
+describe('delivery com entrega no endereço', () => {
+  const address = {
+    cep: '60000000', street: 'Rua Antônio Jacó', number: '490', district: 'Parque Santa Rosa',
+    complement: 'Casa 2', reference: 'Baratão', city: 'Fortaleza', state: 'CE',
+  }
+
+  it('leva o endereço no payload e na observação, que é o que o PDV mostra', () => {
+    const p = buildOrderPayload(input({ mode: 'delivery', deliveryAddress: address, note: 'Sem cebola' }))
+    expect(p.deliveryAddress).toMatchObject({ street: 'Rua Antônio Jacó', number: '490' })
+    expect(p.note).toBe(
+      'ENTREGA: Rua Antônio Jacó, 490 - Casa 2 - Parque Santa Rosa - Fortaleza/CE - CEP 60000-000 - Ref: Baratão\nSem cebola')
+    expect(p.paymentMethod.label).toBe('Pagar na entrega')
+  })
+
+  it('retirada não manda endereço', () => {
+    const p = buildOrderPayload(input({ mode: 'delivery', deliveryAddress: null }))
+    expect(p).not.toHaveProperty('deliveryAddress')
+    expect(p.note).toBeNull()
+    expect(p.paymentMethod.label).toBe('Pagar na retirada')
+  })
+})

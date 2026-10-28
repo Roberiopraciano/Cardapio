@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import { api, clearStaleApiCache, ApiError } from './api/client'
 import { parseQrParams } from './lib/qrParams'
@@ -56,6 +56,7 @@ function classifyBootError(err: unknown): BootErrorKind {
 }
 
 function Boot() {
+  const location = useLocation()
   const {
     setParams, setLoading, setBooted, setClosedReason,
     setBranch, setCompany, setMenuData,
@@ -257,12 +258,15 @@ function Boot() {
     />
   }
 
+  // O checkout é um modal sobre o cardápio: em /checkout as rotas seguem
+  // desenhando a Home (a mesma instância, sem remontar) e o modal vem por cima
+  const isCheckout = location.pathname === '/checkout'
+
   return (
     <>
-      <Routes>
+      <Routes location={isCheckout ? { ...location, pathname: '/' } : location}>
         <Route path="/" element={<Home />} />
         <Route path="/produto/:id" element={<Col><ProductDetail /></Col>} />
-        <Route path="/checkout" element={<Col><Checkout /></Col>} />
         <Route path="/confirmacao" element={<Col><Confirmation /></Col>} />
         <Route path="/totem" element={<Col><TotemHandoffPage /></Col>} />
         <Route path="/conta" element={<Col><TableBill /></Col>} />
@@ -270,6 +274,7 @@ function Boot() {
         <Route path="/pedidos" element={<Col><OrderHistory /></Col>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      {isCheckout && <Checkout />}
       <TabBar />
       <ConsentBanner />
       <ToastContainer />
