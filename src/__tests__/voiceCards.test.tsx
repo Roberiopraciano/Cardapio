@@ -148,6 +148,12 @@ describe('modo cards do assistente', () => {
     expect(choiceVisuals(question({ options: ['Frango com bacon'], product_ids: ['p2'] }), index)).toBeNull()
   })
 
+  it('categoria vira card com a foto do primeiro item dela que tem foto', () => {
+    const visuals = choiceVisuals(question({ options: ['Refrigerantes', 'Pratos'], covers: [['sumiu', 'o1'], ['p2']] }), index)
+    expect(visuals).toEqual([{ image: 'https://x/o1.jpg', description: '' }, { image: '', description: '' }])
+    expect(choiceVisuals(question({ options: ['Refrigerantes', 'Sucos'], covers: [['o1']] }), index)).toBeNull()
+  })
+
   it('desenha um card por opção com nome, descrição e preço', () => {
     const q = question({ options: ['Frango com salada', 'Frango com bacon'], product_ids: ['p1', 'p2'], prices: ['R$ 29,90', 'R$ 32,90'] })
     const markup = renderToStaticMarkup(
@@ -157,5 +163,20 @@ describe('modo cards do assistente', () => {
     expect(markup).toContain('Peito grelhado e folhas')
     expect(markup).toContain('R$ 32,90')
     expect(markup).not.toContain('Não, obrigado')
+  })
+})
+
+describe('observação no resumo do pedido', () => {
+  const withItem = (note = '') => ({
+    review_id: 'r1', items: [{ client_item_ref: 'audio-1', product_id: 'p1', quantity: 1, preparation_note: note, selected_options: {},
+      display: { name: 'X-Frango' }, validation_status: 'valid' as const, missing_required_group_ids: [], subtotal_minor: 2990 }],
+    invalid_items: [], missing_required_selections: [], items_not_found: [], ambiguous_items: [],
+    totals: { currency: 'BRL', subtotal_minor: 2990, total_minor: 2990 }, expires_at: '',
+  })
+
+  it('só oferece observação quando o resumo pode editar', () => {
+    // O resumo abre fechado: o convite aparece no cabeçalho
+    expect(renderToStaticMarkup(<OrderSummary review={withItem()} onNote={noop} />)).toContain('pôr observação')
+    expect(renderToStaticMarkup(<OrderSummary review={withItem()} />)).not.toContain('pôr observação')
   })
 })

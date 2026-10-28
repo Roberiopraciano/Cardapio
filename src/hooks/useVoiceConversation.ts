@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   replyVoiceConversation, startVoiceConversation, startVoiceSession,
-  type VoiceAnswer, type VoiceConversation, type VoiceReview,
+  type VoiceAnswer, type VoiceConversation, type VoiceNote, type VoiceReview,
 } from '../services/voiceOrderApi'
 import { errorCode, typedAnswerTarget } from '../lib/voiceConversation'
 
@@ -67,6 +67,13 @@ export function useVoiceConversation(branchId: string) {
     return target ? reply([{ question_id: target.id, text }]) : reply([], text)
   }, [conversation, reply])
 
+  /** Observação de preparo nos itens do resumo: o servidor aplica direto, sem a IA e sem gastar rodada. */
+  const note = useCallback((notes: VoiceNote[]) => run(async () => {
+    if (!conversation) return
+    const result = await replyVoiceConversation(token, conversation.conversation_id, { notes })
+    if (alive.current) setConversation(result)
+  }), [run, conversation, token])
+
   const resend = useCallback(() => { const again = retry.current; return again ? run(again) : Promise.resolve() }, [run])
 
   /** Troca a revisão exibida (o servidor devolveu preços novos na confirmação). */
@@ -77,5 +84,5 @@ export function useVoiceConversation(branchId: string) {
   const reset = useCallback(() => { setConversation(null); setError(null); retry.current = null }, [])
   const fail = useCallback((code: string) => setError(code), [])
 
-  return { token, conversation, busy, error, start, reply, say, resend, replaceReview, reset, fail }
+  return { token, conversation, busy, error, start, reply, say, note, resend, replaceReview, reset, fail }
 }

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canContinue, errorCode, errorMessage, exampleOrders, isRetryable, itemCountLabel, splitOptionPrice,
-  statusMessage, summaryLines, summaryTotal, toAnswers, typedAnswerTarget, visibleChat,
+  statusMessage, summaryLines, summaryTotal, thinkingSteps, toAnswers, typedAnswerTarget, visibleChat,
 } from '../lib/voiceConversation'
 import type { Product } from '../types'
 import type { VoiceChatMessage, VoiceConversation, VoiceItem, VoiceQuestion, VoiceReview } from '../services/voiceOrderApi'
@@ -178,5 +178,17 @@ describe('exemplos de pedido', () => {
   it('não inventa exemplo quando o cardápio tem poucos produtos', () => {
     expect(exampleOrders([product('X-Bacon')])).toEqual([])
     expect(exampleOrders([])).toEqual([])
+  })
+})
+
+describe('thinkingSteps', () => {
+  it('a primeira rodada passa por várias etapas, começando pelo jeito que o cliente pediu', () => {
+    expect(thinkingSteps(true, true)[0]).toBe('Ouvindo seu pedido…')
+    expect(thinkingSteps(true, false)[0]).toBe('Lendo seu pedido…')
+    expect(thinkingSteps(true, false)).toContain('Selecionando os produtos…')
+  })
+
+  it('as respostas seguintes têm etapas curtas', () => {
+    expect(thinkingSteps(false, true)[0]).toBe('Conferindo…')
   })
 })

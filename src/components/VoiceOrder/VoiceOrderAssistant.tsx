@@ -4,8 +4,10 @@ import type { Product } from '../../types'
 import { confirmVoiceReview, type VoiceItem, type VoiceQuestion, type VoiceReview } from '../../services/voiceOrderApi'
 import { useAudioRecorder } from '../../hooks/useAudioRecorder'
 import { useVoiceConversation } from '../../hooks/useVoiceConversation'
+import { useAssistantVoice } from '../../hooks/useAssistantVoice'
+import { speechEnabled } from '../../lib/assistantVoice'
 import {
-  addToCartErrorCode, canContinue, choiceVisuals, errorMessage, exampleOrders, isRetryable, statusMessage, summaryTotal,
+  addToCartErrorCode, canContinue, choiceVisuals, errorMessage, exampleOrders, isRetryable, statusMessage, summaryTotal, thinkingSteps,
   toAnswers, visibleChat, visualIndex, voiceCardsEnabled, type ChoiceVisual, type Selection,
 } from '../../lib/voiceConversation'
 import ConfirmModal from '../ConfirmModal'
@@ -41,7 +43,17 @@ function Bubble({ role, children }: { role: 'user' | 'assistant'; children: stri
   )
 }
 
-function Thinking({ label }: { label: string }) {
+const THINKING_INTERVAL_MS = 1800
+
+/** Indicador de "pensando" com a mensagem trocando a cada poucos segundos (para na última). */
+function Thinking({ steps }: { steps: string[] }) {
+  const [step, setStep] = useState(0)
+  useEffect(() => {
+    if (step >= steps.length - 1) return
+    const timer = setTimeout(() => setStep(current => current + 1), THINKING_INTERVAL_MS)
+    return () => clearTimeout(timer)
+  }, [step, steps.length])
+  const label = steps[Math.min(step, steps.length - 1)]
   return (
     <div className="flex justify-start" role="status">
       <p className="flex items-center gap-2 rounded-2xl rounded-bl-md px-3.5 py-2 text-sm" style={{ background: 'var(--bg-input)', color: 'var(--text-lo)' }}>
@@ -111,7 +123,7 @@ function QuestionStep({ questions, busy, visuals, onSubmit }: {
  */
 export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose }: Props) {
   const talk = useVoiceConversation(branchId)
-  const { conversation, busy, error, start, say, reply, resend, replaceReview, reset, fail, token } = talk
+  const { conversation, busy, error, start, say, reply, note, resend, replaceReview, reset, fail, token } = talk
   const [draft, setDraft] = useState('')
   const [outgoing, setOutgoing] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -126,9 +138,19 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
   const panelRef = useRef<HTMLElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const startedAt = useRef(0)
+  const [startedByVoice, setStartedByVoice] = useState(false)
+  const voice = useAssistantVoice(token, conversation?.conversation_id ?? null)
+  const { speak, filler, stop: stopSpeaking, unlock: unlockVoice } = voice
+  /** Cada mensagem do cliente (fala, texto, toque) é uma vez nova: a IA diz uma frase de espera enquanto responde. */
+  const [turn, setTurn] = useState(0)
+  // O servidor manda speech_id (mesmo null) só quando a voz está ligada lá; sem isso, nem o botão de som aparece.
+  const voiceAvailable = conversation !== null && conversation.speech_id !== undefined
+  const voiceOn = speechEnabled(voice.pref, startedByVoice)
 
   const sendAudio = useCallback((audio: Blob) => {
     if (audio.size < 1200) { fail('NOTHING_HEARD'); return }
+    setStartedByVoice(true)
+    setTurn(current => current + 1)
     setOutgoing('🎙 Áudio enviado')
     void start({ audio }).finally(() => setOutgoing(null))
   }, [start, fail])
@@ -150,6 +172,26 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
     return () => window.removeEventListener('keydown', onKey)
   }, [leaving, manual, requestClose])
 
+  // Fala cada rodada nova (e a atual, se o cliente ligar o som agora). Nunca enquanto ele grava.
+  // `spoken` evita repetir a mesma rodada quando só o token ou a conversa mudam de referência.
+  const speechId = conversation?.speech_id ?? null
+  const spoken = useRef<string | null>(null)
+  useEffect(() => {
+    if (!voiceOn || recorder.recording || speechId === null) { stopSpeaking(); spoken.current = null; return }
+    const key = `${conversation?.conversation_id}:${speechId}`
+    if (spoken.current === key) return
+    spoken.current = key
+    speak(speechId)
+  }, [voiceOn, recorder.recording, speechId, conversation?.conversation_id, speak, stopSpeaking])
+
+  // Frase de espera de cada vez nova. Na primeira mensagem o token chega um instante depois (abre a sessão): toca então.
+  const fillerTurn = useRef(0)
+  useEffect(() => {
+    if (!voiceOn || turn === 0 || fillerTurn.current === turn || !token) return
+    fillerTurn.current = turn
+    filler(turn - 1)
+  }, [voiceOn, turn, token, filler])
+
   // Cronômetro da gravação
   useEffect(() => {
     if (!recorder.recording) return
@@ -165,6 +207,8 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
 
   const toggleRecording = async () => {
     if (busy) return
+    unlockVoice()
+    stopSpeaking()
     setNotice(null)
     if (recorder.recording) {
       try { sendAudio(await recorder.stop()) } catch { fail('VOICE_ORDER_UNAVAILABLE') }
@@ -183,6 +227,9 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
   const sendText = () => {
     const text = draft.trim()
     if (!text || busy) return
+    unlockVoice()
+    stopSpeaking()
+    setTurn(current => current + 1)
     setDraft('')
     setNotice(null)
     setOutgoing(text)
@@ -190,6 +237,9 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
   }
 
   const answer = (answers: ReturnType<typeof toAnswers>, label: string) => {
+    unlockVoice()
+    stopSpeaking()
+    setTurn(current => current + 1)
     setNotice(null)
     setOutgoing(label)
     void reply(answers).finally(() => setOutgoing(null))
@@ -221,7 +271,7 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
     }
   }
 
-  const restart = () => { reset(); setNotice(null); setDraft('') }
+  const restart = () => { stopSpeaking(); reset(); setNotice(null); setDraft(''); setStartedByVoice(false) }
 
   const questions = conversation?.questions ?? []
   const chat = conversation ? visibleChat(conversation.chat, questions) : []
@@ -247,9 +297,24 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
             <h2 className="text-lg font-bold" style={{ color: 'var(--text-hi)' }}>Peça do seu jeito</h2>
             <p className="text-xs" style={{ color: 'var(--text-lo)' }}>Fale ou escreva. Eu monto o pedido e pergunto o que faltar.</p>
           </div>
-          <button type="button" onClick={requestClose} aria-label="Fechar assistente" className="voice-focus shrink-0 w-11 h-11 -mr-2 -mt-1 rounded-full flex items-center justify-center" style={{ color: 'var(--text-lo)' }}>
-            <Icon name="close" size={18} />
-          </button>
+          <div className="shrink-0 flex items-center -mr-2 -mt-1">
+            {voiceAvailable && (
+              <button
+                type="button"
+                onClick={() => voice.choose(!voiceOn)}
+                aria-pressed={voiceOn}
+                aria-label={voiceOn ? 'Silenciar a voz do assistente' : 'Ativar a voz do assistente'}
+                title={voiceOn ? 'Silenciar' : 'Ativar voz'}
+                className={`voice-focus w-11 h-11 rounded-full flex items-center justify-center ${voice.speaking ? 'voice-pulse' : ''}`}
+                style={{ color: voiceOn ? 'var(--color-brand)' : 'var(--text-lo)' }}
+              >
+                <Icon name={voiceOn ? 'speaker' : 'muted'} size={17} />
+              </button>
+            )}
+            <button type="button" onClick={requestClose} aria-label="Fechar assistente" className="voice-focus w-11 h-11 rounded-full flex items-center justify-center" style={{ color: 'var(--text-lo)' }}>
+              <Icon name="close" size={18} />
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3" aria-live="polite">
@@ -291,7 +356,7 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
 
           {chat.map((message, index) => <Bubble key={`${index}-${message.role}`} role={message.role}>{message.text}</Bubble>)}
           {outgoing && <Bubble role="user">{outgoing}</Bubble>}
-          {busy && <Thinking label={conversation ? 'Conferindo…' : 'Montando seu pedido…'} />}
+          {busy && <Thinking key={conversation ? 'reply' : 'first'} steps={thinkingSteps(!conversation, startedByVoice)} />}
 
           {!busy && questions.length > 0 && (
             <QuestionStep key={stepKey} questions={questions} busy={busy} visuals={visuals} onSubmit={answer} />
@@ -321,7 +386,12 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
         </div>
 
         <footer className="px-4 pt-2 space-y-2 border-t" style={{ borderColor: 'var(--border)', paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }}>
-          <OrderSummary review={conversation?.review ?? null} />
+          <OrderSummary
+            review={conversation?.review ?? null}
+            products={products}
+            busy={busy || confirming}
+            onNote={(itemRef, text) => { stopSpeaking(); setNotice(null); void note([{ item_ref: itemRef, note: text }]) }}
+          />
 
           {conversation?.can_confirm && (
             <button
@@ -339,12 +409,24 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
           )}
 
           {(hasOrder || conversation?.status === 'incomplete') && (
-            <div className="flex items-center justify-between">
-              <button type="button" onClick={() => conversation && setManual(conversation.review)} className="voice-focus min-h-9 text-xs font-semibold underline" style={{ color: 'var(--text-lo)' }}>
-                Ajustar manualmente
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => { stopSpeaking(); if (conversation) setManual(conversation.review) }}
+                className="voice-focus min-h-10 rounded-xl px-3 flex items-center justify-center gap-2 text-xs font-semibold disabled:opacity-50"
+                style={{ background: 'var(--bg-input)', color: 'var(--text-hi)', border: '1px solid var(--border)' }}
+              >
+                <Icon name="edit" size={12} /> Ajustar manualmente
               </button>
-              <button type="button" onClick={restart} className="voice-focus min-h-9 text-xs font-semibold underline" style={{ color: 'var(--text-lo)' }}>
-                Recomeçar
+              <button
+                type="button"
+                disabled={busy}
+                onClick={restart}
+                className="voice-focus min-h-10 rounded-xl px-3 flex items-center justify-center gap-2 text-xs font-semibold disabled:opacity-50"
+                style={{ background: 'transparent', color: 'var(--text-lo)', border: '1px solid var(--border)' }}
+              >
+                <Icon name="refresh" size={12} /> Recomeçar
               </button>
             </div>
           )}

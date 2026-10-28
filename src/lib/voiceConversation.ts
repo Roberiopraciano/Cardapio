@@ -74,6 +74,7 @@ export function typedAnswerTarget(questions: VoiceQuestion[]): VoiceQuestion | n
 
 export interface SummaryLine {
   key: string
+  productId: string
   title: string
   price: string
   extras: string[]
@@ -87,6 +88,7 @@ export function summaryLines(review: VoiceReview | null): SummaryLine[] {
   if (!review) return []
   return review.items.map(item => ({
     key: item.client_item_ref,
+    productId: item.product_id,
     title: `${item.quantity}x ${item.display.name}`,
     price: formatCurrency(item.subtotal_minor / 100),
     extras: (item.options ?? []).map(option => option.display_name),
@@ -113,6 +115,16 @@ export function visibleChat(chat: VoiceChatMessage[], questions: VoiceQuestion[]
   let end = chat.length
   while (end > 0 && chat[end - 1].role === 'assistant' && open.has(chat[end - 1].text)) end--
   return chat.slice(0, end)
+}
+
+/**
+ * Mensagens de "pensando", trocadas de tempos em tempos enquanto o servidor responde (a primeira rodada passa pela
+ * IA e demora mais). Param na última: voltar ao começo pareceria que recomeçou.
+ */
+export function thinkingSteps(first: boolean, byVoice: boolean): string[] {
+  return first
+    ? [byVoice ? 'Ouvindo seu pedido…' : 'Lendo seu pedido…', 'Procurando no cardápio…', 'Selecionando os produtos…', 'Conferindo preços e opções…', 'Montando seu pedido…']
+    : ['Conferindo…', 'Procurando as opções…', 'Atualizando seu pedido…']
 }
 
 /** Frase de fechamento da rodada, mostrada depois do histórico. Sugestões falam por si nos cartões. */
@@ -169,17 +181,26 @@ export function visualIndex(products: Product[]): Map<string, ChoiceVisual> {
 
 /**
  * Foto e descrição de cada opção, na ordem de options, ou null quando a pergunta não vira cards:
- * opção sem produto (categoria, "Refrigerantes"), produto que o cardápio local não tem, ou nenhuma opção com foto
+ * opção sem produto nem capa, produto que o cardápio local não tem, ou nenhuma opção com foto
  * (cards só com a inicial não ajudam mais que a lista).
+ *
+ * Categoria ("Refrigerantes") não é produto: a capa é a foto do primeiro item dela que tem foto, sem descrição.
  */
 export function choiceVisuals(question: VoiceQuestion, index: Map<string, ChoiceVisual>): ChoiceVisual[] | null {
-  const ids = question.product_ids ?? []
-  if (ids.length !== question.options.length || question.options.length === 0) return null
+  if (question.options.length === 0) return null
   const visuals: ChoiceVisual[] = []
-  for (const id of ids) {
-    const visual = id ? index.get(id) : undefined
-    if (!visual) return null
-    visuals.push(visual)
+  for (let at = 0; at < question.options.length; at++) {
+    const id = question.product_ids?.[at]
+    if (id) {
+      const visual = index.get(id)
+      if (!visual) return null
+      visuals.push(visual)
+      continue
+    }
+    const cover = question.covers?.[at]
+    if (!cover) return null
+    const image = cover.map(item => index.get(item)?.image ?? '').find(Boolean) ?? ''
+    visuals.push({ image, description: '' })
   }
   return visuals.some(visual => visual.image) ? visuals : null
 }

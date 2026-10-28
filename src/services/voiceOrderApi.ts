@@ -97,6 +97,8 @@ export interface VoiceQuestion {
   original_prices?: string[]
   /** Produto (ou opcional) de cada opção, na mesma ordem de options; '' quando a opção não é produto (categoria). */
   product_ids?: string[]
+  /** Pergunta de categoria ("Refrigerantes"): alguns itens de cada uma, cuja foto serve de capa do card. */
+  covers?: string[][]
   optional: boolean
 }
 
@@ -115,6 +117,8 @@ export interface VoiceConversation {
   notes: string[]
   chat: VoiceChatMessage[]
   turns_left: number
+  /** Número da fala desta rodada (o áudio vem de fetchVoiceSpeech). Ausente = servidor sem voz; null = nada a dizer. */
+  speech_id?: number | null
 }
 
 export interface VoiceAnswer {
@@ -123,6 +127,12 @@ export interface VoiceAnswer {
   option_index?: number
   text?: string
   declined?: boolean
+}
+
+/** Observação de preparo de um item do resumo ("sem cebola"); '' apaga. Aplicada sem a IA. */
+export interface VoiceNote {
+  item_ref: string
+  note: string
 }
 
 /** Começa a conversa com um texto digitado ou com um áudio gravado. */
@@ -141,8 +151,30 @@ export async function startVoiceConversation(token: string, input: { text: strin
 
 /** Responde às perguntas da rodada e/ou acrescenta algo ao pedido. */
 export async function replyVoiceConversation(
-  token: string, conversationId: string, reply: { answers?: VoiceAnswer[]; text?: string },
+  token: string, conversationId: string, reply: { answers?: VoiceAnswer[]; text?: string; notes?: VoiceNote[] },
 ): Promise<VoiceConversation> {
   const json = await post<{ data: VoiceConversation }>(`/conversation/${conversationId}/reply`, JSON.stringify(reply), token)
   return json.data
+}
+
+/** Quantas frases de espera o servidor tem (SpeechWriter::FILLERS). */
+export const VOICE_FILLER_COUNT = 5
+
+/** Áudio de uma frase de espera ("Certo, vou ver as opções que tenho."), da lista fixa do servidor. */
+export async function fetchVoiceFiller(token: string, index: number): Promise<Blob> {
+  const response = await fetch(`${BASE_URL}/api/v1/voice-order/conversation/filler/${index}`, {
+    signal: AbortSignal.timeout(20_000), headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.blob()
+}
+
+/** Áudio (WAV) da fala da rodada. null = nada a dizer. O texto nunca sai do servidor: só o número da rodada vai. */
+export async function fetchVoiceSpeech(token: string, conversationId: string, speechId: number): Promise<Blob | null> {
+  const response = await fetch(`${BASE_URL}/api/v1/voice-order/conversation/${conversationId}/speech/${speechId}`, {
+    cache: 'no-store', signal: AbortSignal.timeout(20_000), headers: { Authorization: `Bearer ${token}` },
+  })
+  if (response.status === 204) return null
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.blob()
 }

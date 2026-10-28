@@ -19,6 +19,8 @@ interface Props {
  */
 export default function ProductChoiceCards({ question, visuals, selected, disabled, onPick, onSkip }: Props) {
   const suggestion = question.kind === 'suggestion'
+  // Até 3 cabem lado a lado. Mais que isso vira grade com rolagem vertical: no desktop a roda do mouse não rola para o lado.
+  const grid = question.options.length > 3
   return (
     <section className="space-y-2 voice-rise">
       {suggestion && (
@@ -28,8 +30,10 @@ export default function ProductChoiceCards({ question, visuals, selected, disabl
       <div
         role="radiogroup"
         aria-label={question.question}
-        className="-mx-4 px-4 flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1"
-        style={{ scrollbarWidth: 'none' }}
+        className={grid
+          ? 'grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[26rem] overflow-y-auto overscroll-contain pr-1'
+          : '-mx-4 px-4 flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1'}
+        style={grid ? undefined : { scrollbarWidth: 'none' }}
       >
         {question.options.map((label, index) => {
           const split = splitOptionPrice(label)
@@ -46,7 +50,7 @@ export default function ProductChoiceCards({ question, visuals, selected, disabl
               aria-checked={active}
               disabled={disabled}
               onClick={() => onPick(index)}
-              className="voice-focus snap-start shrink-0 w-36 flex flex-col rounded-2xl overflow-hidden text-left transition-transform active:scale-[0.97] disabled:opacity-60"
+              className={`voice-focus ${grid ? 'w-full' : 'snap-start shrink-0 w-36'} flex flex-col rounded-2xl overflow-hidden text-left transition-transform active:scale-[0.97] disabled:opacity-60`}
               style={{
                 background: 'var(--bg-card)',
                 border: active ? '2px solid var(--color-brand)' : '1px solid var(--border)',

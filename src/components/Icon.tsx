@@ -8,7 +8,7 @@ import {
   faMinus, faPlus, faCheck, faClock, faTag, faMobileScreenButton,
   faUserTie, faHandsPraying, faFire, faTruckFast, faLanguage,
   faTrash, faPen, faCircleInfo, faTriangleExclamation, faHourglassHalf,
-  faMicrophone, faPaperPlane,
+  faMicrophone, faPaperPlane, faVolumeHigh, faVolumeXmark,
 } from '@fortawesome/free-solid-svg-icons'
 
 /**
@@ -56,6 +56,8 @@ export const ICONS = {
   waiting: faHourglassHalf,
   mic: faMicrophone,
   send: faPaperPlane,
+  speaker: faVolumeHigh,
+  muted: faVolumeXmark,
 } as const
 
 export type IconName = keyof typeof ICONS
