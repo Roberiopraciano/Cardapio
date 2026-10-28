@@ -16,6 +16,7 @@ import Icon from '../components/Icon'
 import type { IconName } from '../components/Icon'
 import QrScanner from '../components/QrScanner'
 import MesaContaErp from '../components/MesaContaErp'
+import BerpLoader from '../components/BerpLoader'
 import { tableLabel } from '../lib/tableLabel'
 
 const STATUS_LABEL: Record<string, string> = {
@@ -477,13 +478,7 @@ export default function TableBill() {
       )}
 
       <div className="px-4 pt-4 flex flex-col gap-4">
-        {loading && orders === null && (
-          <div className="flex flex-col gap-3">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="skeleton h-24 rounded-2xl" />
-            ))}
-          </div>
-        )}
+        {loading && orders === null && <BerpLoader label="Carregando a conta…" />}
 
         {error === 'network' && (
           <EmptyState

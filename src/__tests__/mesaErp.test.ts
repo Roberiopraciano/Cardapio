@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   adoptClientOrderId, buildMesaItems, classifyMesa, clearMesaSession, erpCode, getMesaClientOrderId,
-  billItemTotal, groupEntries, billOriginLabel, billPersonLabel, isStaffItem, buildPersonColors, flattenBill, groupBill, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
+  billItemTotal, cancelledItems, groupEntries, billOriginLabel, billPersonLabel, isStaffItem, buildPersonColors, flattenBill, groupBill, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
 } from '../lib/mesaErp'
 import type { CartItem, Product } from '../types'
 
@@ -362,5 +362,22 @@ describe('detalhes de um grupo (pessoa / categoria)', () => {
 
   it('pessoa/categoria que não existe: lista vazia', () => {
     expect(groupEntries(parseMesaBill(REAL).itens, 'pessoa', 'Ninguém')).toEqual([])
+  })
+})
+
+describe('itens cancelados não somem', () => {
+  const { itens } = parseMesaBill({ success: true, data: { itens: [
+    { id: 1, seqPro: 1, seqProPai: 0, descricao: 'Combo', categoria: 'C', quantidade: 1, valorTotal: 30, nomeCliente: 'Ana', cancelado: true,
+      complements: [{ id: 2, seqPro: 2, seqProPai: 1, descricao: 'Refri', categoria: 'B', quantidade: 1, valorTotal: 5, nomeCliente: 'Ana', cancelado: false }] },
+    { id: 3, seqPro: 3, seqProPai: 0, descricao: 'Pizza', categoria: 'P', quantidade: 1, valorTotal: 40, nomeCliente: 'Ana', cancelado: false,
+      complements: [{ id: 4, seqPro: 4, seqProPai: 3, descricao: 'Borda', categoria: 'P', quantidade: 1, valorTotal: 8, nomeCliente: 'Ana', cancelado: true }] },
+  ] } })
+
+  it('lista o item cancelado e o complemento cancelado, mas não o que só está dentro de um pai cancelado', () => {
+    expect(cancelledItems(itens).map((i) => i.descricao)).toEqual(['Combo', 'Borda'])
+  })
+
+  it('o total continua sem os cancelados', () => {
+    expect(groupBill(itens, 'pessoa')).toEqual([{ key: 'Ana', label: 'Ana', count: 1, total: 40 }])
   })
 })

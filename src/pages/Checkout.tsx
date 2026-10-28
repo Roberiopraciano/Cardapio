@@ -37,7 +37,7 @@ import CheckoutStepper, { type Step } from '../components/CheckoutStepper'
 import DeliveryAddressModal from '../components/DeliveryAddressModal'
 import {
   type AddressBook, loadAddressBook, saveAddressBook, selectedAddress, selectAddress, removeAddress, upsertAddress,
-  isAddressComplete, addressLine1, addressLine2,
+  isAddressComplete, addressLine1, addressLine2, deliveryFeeFor, type Neighborhood,
 } from '../lib/deliveryAddress'
 import DeliveryAddressList from '../components/DeliveryAddressList'
 import { parseMoney, changeForError, changeAmount, brl } from '../lib/cashChange'
@@ -111,6 +111,16 @@ export default function Checkout() {
   const [changeForText, setChangeForText] = useState('')
   const [couponOpen, setCouponOpen] = useState(couponCode !== '')
   const deliverToAddress = mode === 'delivery' && fulfillment === 'entrega'
+  // Bairros da unidade (Cadastros > Delivery). Vazio = unidade sem taxa por bairro
+  const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([])
+  useEffect(() => {
+    if (mode !== 'delivery' || !params?.branchId) return
+    let cancelled = false
+    api.getNeighborhoods(params.branchId)
+      .then((list) => { if (!cancelled) setNeighborhoods(list) })
+      .catch(() => { /* sem a lista, o bairro segue digitado e sem taxa */ })
+    return () => { cancelled = true }
+  }, [mode, params?.branchId])
 
   // Delivery tem a etapa de entrega; balcão e mesa vão direto ao pagamento
   const steps: Step[] = mode === 'delivery' ? ['entrega', 'pagamento', 'confirmacao'] : ['pagamento', 'confirmacao']
@@ -208,8 +218,11 @@ export default function Checkout() {
   ]
 
   const subtotal = total()
-  const finalTotal = totalWithCoupon()
-  const tmProduto = calcTmProduto(items, finalTotal)
+  /** Itens com desconto do cupom, sem a taxa de entrega. */
+  const itemsTotal = totalWithCoupon()
+  const deliveryFee = deliverToAddress ? deliveryFeeFor(address, neighborhoods) : 0
+  const finalTotal = itemsTotal + deliveryFee
+  const tmProduto = calcTmProduto(items, itemsTotal)
   const changeFor = parseMoney(changeForText)
   const changeError = !askChange ? null
     : needsChange === null ? 'Informe se precisa de troco.'
@@ -338,7 +351,7 @@ export default function Checkout() {
 
   /** Confere a etapa atual antes de avançar; a última envia o pedido. */
   const handleContinue = () => {
-    if (step === 'entrega' && deliverToAddress && !isAddressComplete(address)) {
+    if (step === 'entrega' && deliverToAddress && !isAddressComplete(address, neighborhoods)) {
       openAddress()
       return
     }
@@ -508,7 +521,7 @@ export default function Checkout() {
       setError(`Informe o número da sua ${comandaLabel.toLowerCase()}.`)
       return
     }
-    if (deliverToAddress && !isAddressComplete(address)) {
+    if (deliverToAddress && !isAddressComplete(address, neighborhoods)) {
       setStepIdx(steps.indexOf('entrega'))
       openAddress()
       return
@@ -635,7 +648,7 @@ export default function Checkout() {
         branchId: params?.branchId ?? '',
         simpleAuth,
         consumptioncode, consumptionint,
-        items, subtotal, total: finalTotal,
+        items, subtotal, total: finalTotal, deliveryFee,
         client: { name: clientName, phone: clientPhone, cpf: clientCpf, email: clientEmail },
         askEmail,
         // Só vai no payload quando a branch usa comanda e o cliente informou
@@ -838,7 +851,7 @@ export default function Checkout() {
                     <Icon name="location" size={18} />
                   </span>
                   <span className="flex-1 min-w-0">
-                    {isAddressComplete(address) ? (
+                    {isAddressComplete(address, neighborhoods) ? (
                       <>
                         <span className="block text-sm font-semibold truncate" style={{ color: 'var(--text-hi)' }}>{addressLine1(address)}</span>
                         <span className="block text-xs truncate" style={{ color: 'var(--text-lo)' }}>
@@ -876,7 +889,7 @@ export default function Checkout() {
                     </span>
                     <span className="block text-xs" style={{ color: appliedCoupon ? '#059669' : 'var(--text-lo)' }}>
                       {appliedCoupon
-                        ? `Desconto de ${formatCurrency(subtotal - finalTotal)} aplicado`
+                        ? `Desconto de ${formatCurrency(subtotal - itemsTotal)} aplicado`
                         : 'Clique e insira o código'}
                     </span>
                   </span>
@@ -1062,7 +1075,7 @@ export default function Checkout() {
                 <p className="text-xs text-amber-600">Seu nome será chamado quando o pedido estiver pronto.</p>
               )}
 
-              {deliverToAddress && isAddressComplete(address) && (
+              {deliverToAddress && isAddressComplete(address, neighborhoods) && (
                 <div className="flex items-start gap-3 pt-3 border-t border-dashed" style={{ borderColor: 'var(--divider)' }}>
                   <span className="w-6 flex justify-center pt-0.5" style={{ color: 'var(--text-lo)' }}>
                     <Icon name="location" size={16} />
@@ -1208,13 +1221,19 @@ export default function Checkout() {
               {appliedCoupon && (
                 <div className="flex justify-between text-sm text-emerald-600">
                   <span>Desconto ({appliedCoupon.title})</span>
-                  <span>−{formatCurrency(subtotal - finalTotal)}</span>
+                  <span>−{formatCurrency(subtotal - itemsTotal)}</span>
                 </div>
               )}
               {packagingTotal > 0 && (
                 <div className="flex justify-between text-sm">
                   <span style={{ color: 'var(--text-lo)' }}>Embalagem (incluída no total)</span>
                   <span style={{ color: 'var(--text-lo)' }}>{formatCurrency(packagingTotal)}</span>
+                </div>
+              )}
+              {deliverToAddress && neighborhoods.length > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span style={{ color: 'var(--text-lo)' }}>Taxa de entrega</span>
+                  <span style={{ color: 'var(--text-lo)' }}>{deliveryFee > 0 ? formatCurrency(deliveryFee) : 'Grátis'}</span>
                 </div>
               )}
             </div>
@@ -1251,6 +1270,7 @@ export default function Checkout() {
     </div>
 
       {addressOpen && <DeliveryAddressModal
+        neighborhoods={neighborhoods}
         initial={book.list.find((a) => a.id === editingId) ?? null}
         onClose={() => setAddressOpen(false)}
         onConfirm={(a) => {

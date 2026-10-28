@@ -11,6 +11,8 @@ export interface DeliveryAddress {
   street: string
   number: string
   district: string
+  /** Bairro cadastrado em Cadastros > Delivery; vazio quando a unidade não cadastrou bairros. */
+  neighborhoodId: string
   complement: string
   reference: string
   city: string
@@ -18,7 +20,7 @@ export interface DeliveryAddress {
 }
 
 export const EMPTY_ADDRESS: DeliveryAddress = {
-  cep: '', street: '', number: '', district: '', complement: '', reference: '', city: '', state: '',
+  cep: '', street: '', number: '', district: '', neighborhoodId: '', complement: '', reference: '', city: '', state: '',
 }
 
 export const UFS = [
@@ -55,14 +57,51 @@ export async function lookupCep(cep: string): Promise<Partial<DeliveryAddress>> 
   }
 }
 
-/** Campos obrigatórios que faltam — vazio = endereço completo. */
-export function missingAddressFields(a: DeliveryAddress): (keyof DeliveryAddress)[] {
-  const required: (keyof DeliveryAddress)[] = ['street', 'number', 'district', 'reference', 'city', 'state']
-  return required.filter((k) => !a[k].trim())
+// ─── Bairros e taxa de entrega ────────────────────────────────────────────────
+
+/** Bairro atendido pela unidade, com a taxa já resolvida pela API. */
+export interface Neighborhood {
+  _id: string
+  name: string
+  fee: number
+  feeTitle?: string
 }
 
-export function isAddressComplete(a: DeliveryAddress | null): a is DeliveryAddress {
-  return a !== null && missingAddressFields(a).length === 0
+function normName(v: string): string {
+  return v.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/** Bairro com o mesmo nome (ignora acento e caixa) — para aproveitar o que o ViaCEP devolveu. */
+export function matchNeighborhood(name: string, list: Neighborhood[]): Neighborhood | null {
+  const wanted = normName(name)
+  return wanted ? (list.find((n) => normName(n.name) === wanted) ?? null) : null
+}
+
+/** Bairro escolhido no endereço; `null` se não escolheu ou se saiu da lista da unidade. */
+export function addressNeighborhood(a: DeliveryAddress | null, list: Neighborhood[]): Neighborhood | null {
+  return a?.neighborhoodId ? (list.find((n) => n._id === a.neighborhoodId) ?? null) : null
+}
+
+/** Taxa de entrega do endereço; 0 quando a unidade não cadastrou bairros. */
+export function deliveryFeeFor(a: DeliveryAddress | null, list: Neighborhood[]): number {
+  return addressNeighborhood(a, list)?.fee ?? 0
+}
+
+/**
+ * Campos obrigatórios que faltam — vazio = endereço completo. Com bairros
+ * cadastrados na unidade o bairro tem de ser um deles (é dele que vem a taxa).
+ */
+export function missingAddressFields(a: DeliveryAddress, neighborhoods: Neighborhood[] = []): (keyof DeliveryAddress)[] {
+  const required: (keyof DeliveryAddress)[] = ['street', 'number', 'district', 'reference', 'city', 'state']
+  const missing = required.filter((k) => !a[k].trim())
+  if (neighborhoods.length > 0 && !addressNeighborhood(a, neighborhoods) && !missing.includes('district')) {
+    missing.push('district')
+  }
+  return missing
+}
+
+export function isAddressComplete(a: DeliveryAddress | null, neighborhoods: Neighborhood[] = []): a is DeliveryAddress {
+  return a !== null && missingAddressFields(a, neighborhoods).length === 0
 }
 
 /** "Rua X, 490" */

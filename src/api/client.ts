@@ -1,6 +1,7 @@
 // Espelho de rest.dart — todas as chamadas públicas (sem Bearer token)
 
 import type { Offer } from '../types'
+import type { Neighborhood } from '../lib/deliveryAddress'
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? ''
 
@@ -354,6 +355,12 @@ export const api = {
     )
     const n = res.data?.[0]?.number
     return typeof n === 'number' ? n : null
+  },
+
+  /** Bairros do delivery da unidade, cada um com a taxa de entrega. Vazio = unidade sem taxa por bairro. */
+  getNeighborhoods: async (branchId: string): Promise<Neighborhood[]> => {
+    const res = await request<{ data?: Neighborhood[] }>(`api/delivery/neighborhoods?branch=${branchId}`)
+    return Array.isArray(res.data) ? res.data : []
   },
 
   getBranch: (id: string) =>

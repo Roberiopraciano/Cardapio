@@ -148,7 +148,7 @@ describe('complementEntries — lê o formato antigo e o novo', () => {
 
 describe('delivery com entrega no endereço', () => {
   const address = {
-    cep: '60000000', street: 'Rua Antônio Jacó', number: '490', district: 'Parque Santa Rosa',
+    cep: '60000000', street: 'Rua Antônio Jacó', number: '490', district: 'Parque Santa Rosa', neighborhoodId: '',
     complement: 'Casa 2', reference: 'Baratão', city: 'Fortaleza', state: 'CE',
   }
 
@@ -158,6 +158,24 @@ describe('delivery com entrega no endereço', () => {
     expect(p.note).toBe(
       'ENTREGA: Rua Antônio Jacó, 490 - Casa 2 - Parque Santa Rosa - Fortaleza/CE - CEP 60000-000 - Ref: Baratão\nSem cebola')
     expect(p.paymentMethod.label).toBe('Pagar na entrega')
+  })
+
+  it('manda a taxa e o bairro; o total já vem com a taxa e o subtotal só com os itens', () => {
+    const p = buildOrderPayload(input({
+      mode: 'delivery', subtotal: 40, total: 47.5, deliveryFee: 7.5,
+      deliveryAddress: { ...address, neighborhoodId: '665f1c2e8f1b2a0012345678' },
+    }))
+    expect(p.deliveryFee).toBe(7.5)
+    expect(p.neighborhoodId).toBe('665f1c2e8f1b2a0012345678')
+    expect(p.subtotal).toBe(40)
+    expect(p.total).toBe(47.5)
+    expect(p.amount).toBe(47.5)
+  })
+
+  it('sem bairro cadastrado não manda neighborhoodId e a taxa é zero', () => {
+    const p = buildOrderPayload(input({ mode: 'delivery', deliveryAddress: address }))
+    expect(p.deliveryFee).toBe(0)
+    expect(p).not.toHaveProperty('neighborhoodId')
   })
 
   it('retirada não manda endereço', () => {
@@ -192,7 +210,7 @@ describe('delivery pago em dinheiro: troco', () => {
     const p = buildOrderPayload(input({
       mode: 'delivery', note: 'Sem cebola', payment: dinheiro, cash: { needsChange: true, changeFor: 100 },
       deliveryAddress: {
-        cep: '', street: 'Rua A', number: '1', district: 'Centro', complement: '', reference: 'Praça', city: 'Fortaleza', state: 'CE',
+        cep: '', street: 'Rua A', number: '1', district: 'Centro', neighborhoodId: '', complement: '', reference: 'Praça', city: 'Fortaleza', state: 'CE',
       },
     }))
     expect(p.note?.split('\n').map((l) => l.split(':')[0])).toEqual(['ENTREGA', 'TROCO', 'Sem cebola'])

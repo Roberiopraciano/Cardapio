@@ -391,6 +391,15 @@ export function billPersonLabel(i: MesaBillItem): string {
 
 export interface BillGroup { key: string; label: string; count: number; total: number }
 
+/**
+ * Itens cancelados (o próprio item marcado, não os que só estão dentro de um pai cancelado).
+ * Cancelado não entra no total, mas nunca pode sumir da tela: o cliente que vê a conta
+ * diferente do que pediu precisa ver o que foi tirado.
+ */
+export function cancelledItems(itens: MesaBillItem[]): MesaBillItem[] {
+  return itens.flatMap((i) => [...(i.cancelado ? [i] : []), ...cancelledItems(i.filhos)])
+}
+
 export interface GroupEntry {
   item: MesaBillItem
   /** Item principal, quando este é um item de dentro de um combo. */

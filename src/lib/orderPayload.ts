@@ -55,6 +55,8 @@ export interface OrderPayloadInput {
   coupon?: Offer | null
   /** Delivery com entrega no endereço; ausente = retirada (ou não é delivery). */
   deliveryAddress?: DeliveryAddress | null
+  /** Taxa de entrega do bairro, já somada em `total` (subtotal continua só dos itens). */
+  deliveryFee?: number
   /** Delivery pago em dinheiro: se precisa de troco e para quanto. Ausente = não é dinheiro. */
   cash?: { needsChange: boolean; changeFor?: number }
   /** UUID do envio: o mesmo em cada retentativa, para o backend não duplicar o pedido. */
@@ -126,7 +128,9 @@ export function buildOrderPayload(i: OrderPayloadInput) {
     total: i.total,
     change: changeBack,
     ...(changeFor > 0 ? { changeFor } : {}),
-    deliveryFee: 0,
+    deliveryFee: i.deliveryFee ?? 0,
+    // O servidor cobra a taxa do cadastro do bairro, não o valor acima
+    ...(i.deliveryAddress?.neighborhoodId ? { neighborhoodId: i.deliveryAddress.neighborhoodId } : {}),
     installments: 1,
     // O cardápio não processa pagamento no pinpad. Enviar null explicitamente
     // evita que consumidores do pedido interpretem a ausência como array vazio.

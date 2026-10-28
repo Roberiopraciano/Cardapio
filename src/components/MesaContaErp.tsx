@@ -6,10 +6,11 @@ import { useCartStore } from '../store/cartStore'
 import { formatCurrency } from '../lib/pricing'
 import { formatQuantity } from '../lib/billFormat'
 import {
-  BILL_STATUS_LABEL, billItemTotal, billOriginLabel, billPersonLabel, buildPersonColors, clearMesaSession, flattenBill, groupBill,
+  BILL_STATUS_LABEL, billItemTotal, cancelledItems, billOriginLabel, billPersonLabel, buildPersonColors, clearMesaSession, flattenBill, groupBill,
   groupEntries, loadMesaSession, mesaErrorMessage, parseMesaBill, STAFF_PILL, type MesaBill, type MesaBillItem, type PillColor,
 } from '../lib/mesaErp'
 import HeaderButton from './HeaderButton'
+import BerpLoader from './BerpLoader'
 
 type View = 'itens' | 'pessoa' | 'categoria'
 
@@ -91,6 +92,7 @@ export default function MesaContaErp({ branchId, table, tableName }: {
   const colors = useMemo(() => buildPersonColors(flattenBill(bill?.itens ?? [])), [bill])
   const colorOf = (label: string): PillColor => colors.get(label) ?? STAFF_PILL
   const active = bill?.itens.filter((i) => !i.cancelado) ?? []
+  const cancelados = cancelledItems(bill?.itens ?? [])
   const groups = bill && view !== 'itens' ? groupBill(bill.itens, view) : []
   const closed = !!bill && bill.status !== 'ABERTA'
   const isMe = (name: string | null) => !!name && !!clientName.trim() && name.trim().toLowerCase() === clientName.trim().toLowerCase()
@@ -107,6 +109,8 @@ export default function MesaContaErp({ branchId, table, tableName }: {
         </div>
         <HeaderButton icon="refresh" onClick={load} label="Atualizar" emphasis disabled={loading} spin={loading} />
       </div>
+
+      {loading && !bill && !noSession && !error && <BerpLoader label="Carregando a conta…" />}
 
       {noSession && (
         <div className="mx-4 mt-6 rounded-2xl border px-5 py-8 text-center" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
@@ -196,6 +200,26 @@ export default function MesaContaErp({ branchId, table, tableName }: {
                 </div>
               )))}
           </div>
+
+          {view !== 'itens' && cancelados.length > 0 && (
+            <div className="mx-4 mt-3 rounded-2xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+              <p className="px-4 pt-3 text-xs font-semibold uppercase tracking-wide" style={{ color: '#b91c1c' }}>
+                {cancelados.length === 1 ? '1 item cancelado' : `${cancelados.length} itens cancelados`} · não entram na conta
+              </p>
+              {cancelados.map((i) => (
+                <div key={i.id} className="px-4 py-2.5 flex justify-between gap-3 text-sm" style={{ opacity: 0.7 }}>
+                  <div className="min-w-0">
+                    <p className="line-through" style={{ color: 'var(--text-hi)' }}>{formatQuantity(i.quantidade)} {i.descricao}</p>
+                    <p className="text-xs mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1" style={{ color: 'var(--text-lo)' }}>
+                      <PersonPill label={billPersonLabel(i)} color={colorOf(billPersonLabel(i))} me={isMe(i.nomeCliente)} />
+                      {i.horaLancamento && <span>{i.horaLancamento}</span>}
+                    </p>
+                  </div>
+                  <span className="line-through whitespace-nowrap" style={{ color: 'var(--text-hi)' }}>{formatCurrency(i.valorTotal)}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {bill.pagamentos.length > 0 && (
             <div className="mx-4 mt-3 rounded-2xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>

@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import HeaderButton from './HeaderButton'
 import {
-  type DeliveryAddress, EMPTY_ADDRESS, UFS, CepNotFoundError,
-  cepDigits, maskCep, lookupCep, missingAddressFields,
+  type DeliveryAddress, type Neighborhood, EMPTY_ADDRESS, UFS, CepNotFoundError,
+  cepDigits, maskCep, lookupCep, missingAddressFields, matchNeighborhood,
 } from '../lib/deliveryAddress'
+import { formatCurrency } from '../lib/pricing'
 
 /** Montado só enquanto aberto: o estado nasce do `initial` a cada abertura. */
 interface Props {
   initial: DeliveryAddress | null
+  /** Bairros atendidos pela unidade; vazio = bairro digitado, sem taxa por bairro. */
+  neighborhoods: Neighborhood[]
   onClose: () => void
   onConfirm: (address: DeliveryAddress) => void
 }
@@ -17,7 +20,7 @@ interface Props {
  * Endereço de entrega em dois passos: CEP (preenche rua, bairro e cidade pelo
  * ViaCEP) e depois o formulário. "Não sei meu CEP" pula direto para o formulário.
  */
-export default function DeliveryAddressModal({ initial, onClose, onConfirm }: Props) {
+export default function DeliveryAddressModal({ initial, neighborhoods, onClose, onConfirm }: Props) {
   // Reabrir com endereço já informado vai direto para a edição
   const [step, setStep] = useState<'cep' | 'form'>(initial ? 'form' : 'cep')
   const [cep, setCep] = useState(initial?.cep ? maskCep(initial.cep) : '')
@@ -43,7 +46,13 @@ export default function DeliveryAddressModal({ initial, onClose, onConfirm }: Pr
     try {
       const found = await lookupCep(cep)
       // Rua do cadastro anterior não vale para outro CEP; número e complemento também não
-      setAddress({ ...EMPTY_ADDRESS, ...found })
+      // Bairro do ViaCEP só vale se a unidade atende: aí já vem escolhido (e com taxa)
+      const hood = neighborhoods.length > 0 ? matchNeighborhood(found.district ?? '', neighborhoods) : null
+      setAddress({
+        ...EMPTY_ADDRESS, ...found,
+        district: hood?.name ?? (neighborhoods.length > 0 ? '' : found.district ?? ''),
+        neighborhoodId: hood?._id ?? '',
+      })
       setStep('form')
     } catch (e) {
       setCepError(e instanceof CepNotFoundError
@@ -53,7 +62,7 @@ export default function DeliveryAddressModal({ initial, onClose, onConfirm }: Pr
   }
 
   const set = (key: keyof DeliveryAddress) => (v: string) => setAddress((a) => ({ ...a, [key]: v }))
-  const missing = missingAddressFields(address)
+  const missing = missingAddressFields(address, neighborhoods)
 
   const confirm = () => {
     if (missing.length > 0) { setShowErrors(true); return }
@@ -133,7 +142,31 @@ export default function DeliveryAddressModal({ initial, onClose, onConfirm }: Pr
                 {field('street', 'Rua', { required: true, autoComplete: 'address-line1' })}
                 {field('number', 'Nº', { required: true, inputMode: 'numeric' })}
               </div>
-              {field('district', 'Bairro', { required: true })}
+              {neighborhoods.length > 0 ? (
+                <div>
+                  <label className="block text-xs font-medium mb-1"
+                    style={{ color: showErrors && missing.includes('district') ? '#dc2626' : 'var(--text-lo)' }}>
+                    Bairro *
+                  </label>
+                  <select value={address.neighborhoodId}
+                    onChange={(e) => {
+                      const hood = neighborhoods.find((n) => n._id === e.target.value)
+                      setAddress((a) => ({ ...a, neighborhoodId: hood?._id ?? '', district: hood?.name ?? '' }))
+                    }}
+                    className="w-full text-sm rounded-xl px-3 py-3 outline-none"
+                    style={{
+                      background: 'var(--bg-input)', color: 'var(--text-hi)',
+                      border: `1px solid ${showErrors && missing.includes('district') ? '#dc2626' : 'var(--border)'}`,
+                    }}>
+                    <option value="">Selecione o bairro</option>
+                    {neighborhoods.map((n) => (
+                      <option key={n._id} value={n._id}>
+                        {n.name}{n.fee > 0 ? ` — taxa ${formatCurrency(n.fee)}` : ' — entrega grátis'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : field('district', 'Bairro', { required: true })}
               {field('complement', 'Complemento', { hint: 'Apto/Bloco/Casa' })}
               {field('reference', 'Ponto de referência', { required: true })}
               <div className="grid grid-cols-[1fr_96px] gap-3">
