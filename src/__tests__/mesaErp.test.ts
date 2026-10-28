@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   adoptClientOrderId, buildMesaItems, classifyMesa, clearMesaSession, erpCode, getMesaClientOrderId,
-  billItemTotal, billOriginLabel, billPersonLabel, isStaffItem, buildPersonColors, flattenBill, groupBill, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
+  billItemTotal, groupEntries, billOriginLabel, billPersonLabel, isStaffItem, buildPersonColors, flattenBill, groupBill, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
 } from '../lib/mesaErp'
 import type { CartItem, Product } from '../types'
 
@@ -329,5 +329,38 @@ describe('quem lançou o item', () => {
     const colors = buildPersonColors(itens)
     expect(colors.get('Garçom (Marcos Silva)')).toEqual(colors.get('Garçom (Paula)'))
     expect(colors.get('Ana')).not.toEqual(colors.get('Garçom (Paula)'))
+  })
+})
+
+describe('detalhes de um grupo (pessoa / categoria)', () => {
+  it('por pessoa: só os itens dela, incluindo o que veio dentro do combo, e a soma bate com o grupo', () => {
+    const { itens } = parseMesaBill(REAL)
+    const entries = groupEntries(itens, 'pessoa', 'Cleberson')
+    expect(entries.map((e) => e.item.descricao)).toEqual(['SEM COD PDV', 'Delicia 1', 'MIX 300 COCA C'])
+    const soma = Math.round(entries.reduce((a, e) => a + e.item.valorTotal, 0) * 100) / 100
+    expect(soma).toBe(groupBill(itens, 'pessoa').find((g) => g.label === 'Cleberson')!.total)
+  })
+
+  it('por categoria: só os produtos dela, de qualquer pessoa, com o item pai quando está dentro de um combo', () => {
+    const { itens } = parseMesaBill(REAL)
+    const entries = groupEntries(itens, 'categoria', 'BEBIDAS')
+    expect(entries.map((e) => [e.item.nomeCliente, e.parent?.descricao])).toEqual([
+      ['Cleberson', 'Delicia 1'], ['Teste 2', 'Delicia 1'],
+    ])
+    const soma = Math.round(entries.reduce((a, e) => a + e.item.valorTotal, 0) * 100) / 100
+    expect(soma).toBe(groupBill(itens, 'categoria').find((g) => g.label === 'BEBIDAS')!.total)
+  })
+
+  it('cancelado (e o que está dentro dele) fica fora', () => {
+    const { itens } = parseMesaBill({ success: true, data: { itens: [
+      { id: 1, seqPro: 1, seqProPai: 0, descricao: 'Combo', categoria: 'C', quantidade: 1, valorTotal: 30, nomeCliente: 'Ana', cancelado: true,
+        complements: [{ id: 2, seqPro: 2, seqProPai: 1, descricao: 'Refri', categoria: 'C', quantidade: 1, valorTotal: 5, nomeCliente: 'Ana' }] },
+    ] } })
+    expect(groupEntries(itens, 'pessoa', 'Ana')).toEqual([])
+    expect(groupEntries(itens, 'categoria', 'C')).toEqual([])
+  })
+
+  it('pessoa/categoria que não existe: lista vazia', () => {
+    expect(groupEntries(parseMesaBill(REAL).itens, 'pessoa', 'Ninguém')).toEqual([])
   })
 })

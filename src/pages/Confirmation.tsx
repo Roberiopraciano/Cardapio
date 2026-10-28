@@ -88,7 +88,7 @@ export default function Confirmation() {
           {mode === 'mesa' ? 'Sua mesa' : 'Sua senha'}
         </p>
         <p className="text-5xl font-bold tracking-widest" style={{ color: 'var(--color-brand)' }}>
-          {mode === 'mesa' ? (tableLabel(consumptioncode) || consumptioncode) : consumptioncode}
+          {mode === 'mesa' ? (tableLabel(params?.table) || tableLabel(consumptioncode) || consumptioncode) : consumptioncode}
         </p>
         {consumptionint > 0 && (
           <p className="text-sm mt-1" style={{ color: 'var(--color-brand)' }}>

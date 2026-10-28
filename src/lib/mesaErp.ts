@@ -391,6 +391,32 @@ export function billPersonLabel(i: MesaBillItem): string {
 
 export interface BillGroup { key: string; label: string; count: number; total: number }
 
+export interface GroupEntry {
+  item: MesaBillItem
+  /** Item principal, quando este é um item de dentro de um combo. */
+  parent: MesaBillItem | null
+}
+
+/**
+ * Os itens que formam um grupo de `groupBill` (a mesma regra: cancelado fora, itens de
+ * dentro de combo contam como itens). A soma de `valorTotal` das entradas é o total do grupo.
+ */
+export function groupEntries(itens: MesaBillItem[], by: 'pessoa' | 'categoria', label: string): GroupEntry[] {
+  const out: GroupEntry[] = []
+  const walk = (list: MesaBillItem[], parent: MesaBillItem | null, parentCancelled: boolean) => {
+    for (const i of list) {
+      const cancelado = parentCancelled || i.cancelado
+      if (!cancelado) {
+        const key = by === 'pessoa' ? billPersonLabel(i) : i.categoria
+        if (key === label) out.push({ item: i, parent })
+      }
+      walk(i.filhos, i, cancelado)
+    }
+  }
+  walk(itens, null, false)
+  return out
+}
+
 /** Soma por pessoa ou por categoria. Item cancelado não entra. Maior consumo primeiro. */
 export function groupBill(itens: MesaBillItem[], by: 'pessoa' | 'categoria'): BillGroup[] {
   const map = new Map<string, BillGroup>()

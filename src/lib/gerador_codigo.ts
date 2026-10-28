@@ -75,6 +75,33 @@ export function resetNumero(): void {
   _cachedNumber = null
 }
 
+/** Contexto a que o código pertence: mesa 3 e balcão têm códigos diferentes. */
+export function codesContextKey(mode: 'mesa' | 'balcao' | 'delivery', table: string): string {
+  return `${mode}:${mode === 'mesa' ? (table || 'MESA') : ''}`
+}
+
+/**
+ * O código guardado ainda serve para este contexto?
+ *
+ * O código fica no navegador (4 h). Sem esta conferência, quem pedia no balcão
+ * e depois escaneava o QR de uma mesa — ou passava da mesa 1 para a 2 — seguia
+ * com o código antigo: a tela dizia "Sua mesa 4TP55" e o pedido ia para a mesa
+ * errada. Em mesa o código TEM de ser o nome da mesa.
+ *
+ * `savedKey` vazio = código gravado antes desta conferência existir: na mesa só
+ * vale se for o nome da mesa; nas demais modalidades não há como saber, mantém.
+ */
+export function codesStillValid(
+  code: string,
+  savedKey: string,
+  mode: 'mesa' | 'balcao' | 'delivery',
+  table: string,
+): boolean {
+  if (!code) return false
+  if (savedKey) return savedKey === codesContextKey(mode, table)
+  return mode !== 'mesa' || code === (table || 'MESA')
+}
+
 /**
  * Gera o consumptioncode para o modo correto:
  * - Mesa:   usa o nome da mesa (ex: "MESA_03")

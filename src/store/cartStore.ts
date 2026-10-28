@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import type { CartItem, CartComplement, Product, ComplementsGroup, WhereConsume, Offer } from '../types'
 import { calcCartItemSubtotal, calcCartTotal } from '../lib/pricing'
 import { saveClientInfo, loadClientInfo } from '../lib/client_storage'
-import { gerarConsumptionCode, getOrCreateNumero, resetNumero } from '../lib/gerador_codigo'
+import { gerarConsumptionCode, getOrCreateNumero, resetNumero, codesContextKey, codesStillValid } from '../lib/gerador_codigo'
 
 interface CartStore {
   items: CartItem[]
@@ -21,6 +21,8 @@ interface CartStore {
   setBannersSeen: (v: boolean) => void
   whereConsume: WhereConsume
   consumptioncode: string; consumptionint: number
+  /** Modalidade+mesa a que o consumptioncode pertence (ver `codesStillValid`). */
+  codesKey: string
   appliedCoupon: Offer | null; couponCode: string
 
   addItem: (product: Product, complements: CartComplement[], note: string, qty: number) => void
@@ -97,7 +99,7 @@ export const useCartStore = create<CartStore>()(
       clientName: '', clientPhone: '', clientCpf: '', clientEmail: '', comanda: '',
       companyScope: '', touchedAt: 0,
       whereConsume: 'OnLocal',
-      consumptioncode: '', consumptionint: 0,
+      consumptioncode: '', consumptionint: 0, codesKey: '',
       appliedCoupon: null, couponCode: '',
 
       addItem: (product, complements, note, qty = 1) => {
@@ -164,7 +166,7 @@ export const useCartStore = create<CartStore>()(
 
       clearCart: () => {
         resetNumero()
-        set({ items: [], orderNote: '', consumptioncode: '', consumptionint: 0, appliedCoupon: null, couponCode: '' })
+        set({ items: [], orderNote: '', consumptioncode: '', consumptionint: 0, codesKey: '', appliedCoupon: null, couponCode: '' })
       },
 
       /**
@@ -213,7 +215,7 @@ export const useCartStore = create<CartStore>()(
         resetNumero()
         set({
           items: [], orderNote: '',
-          consumptioncode: '', consumptionint: 0,
+          consumptioncode: '', consumptionint: 0, codesKey: '',
           appliedCoupon: null, couponCode: '',
           touchedAt: 0,
         })
@@ -227,7 +229,7 @@ export const useCartStore = create<CartStore>()(
         set({
           companyScope: id,
           items: [], orderNote: '',
-          consumptioncode: '', consumptionint: 0,
+          consumptioncode: '', consumptionint: 0, codesKey: '',
           appliedCoupon: null, couponCode: '',
           comanda: '',
           bannersSeen: false, whereConsumeAsked: false,
@@ -271,10 +273,17 @@ export const useCartStore = create<CartStore>()(
       },
 
       initCodes: (mode, table) => {
-        if (get().consumptioncode) return
+        const { consumptioncode, codesKey } = get()
+        if (codesStillValid(consumptioncode, codesKey, mode, table)) {
+          // Código antigo (sem chave) que serve: passa a registrar o contexto
+          if (!codesKey) set({ codesKey: codesContextKey(mode, table) })
+          return
+        }
+        resetNumero()
         set({
           consumptioncode: gerarConsumptionCode(mode, table),
           consumptionint: getOrCreateNumero(),
+          codesKey: codesContextKey(mode, table),
           // A senha entra na contagem de validade: senha de ontem cai numa
           // comanda que já foi fechada e paga
           touchedAt: Date.now(),
@@ -307,7 +316,7 @@ export const useCartStore = create<CartStore>()(
         companyScope: s.companyScope,
         // Idem para a validade: sem persistir, todo reload pareceria carrinho novo
         touchedAt: s.touchedAt,
-        consumptioncode: s.consumptioncode, consumptionint: s.consumptionint,
+        consumptioncode: s.consumptioncode, consumptionint: s.consumptionint, codesKey: s.codesKey,
         couponCode: s.couponCode,
         // A comanda vale para a sessão inteira: o cliente informa uma vez e
         // segue pedindo sem redigitar a cada rodada

@@ -7,7 +7,7 @@ import { formatCurrency } from '../lib/pricing'
 import { formatQuantity } from '../lib/billFormat'
 import {
   BILL_STATUS_LABEL, billItemTotal, billOriginLabel, billPersonLabel, buildPersonColors, clearMesaSession, flattenBill, groupBill,
-  loadMesaSession, mesaErrorMessage, parseMesaBill, STAFF_PILL, type MesaBill, type MesaBillItem, type PillColor,
+  groupEntries, loadMesaSession, mesaErrorMessage, parseMesaBill, STAFF_PILL, type MesaBill, type MesaBillItem, type PillColor,
 } from '../lib/mesaErp'
 import HeaderButton from './HeaderButton'
 
@@ -48,6 +48,9 @@ export default function MesaContaErp({ branchId, table, tableName }: {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
   const [detail, setDetail] = useState<MesaBillItem | null>(null)
   const closeDetail = useCallback(() => setDetail(null), [])
+  // Detalhes de um grupo (uma pessoa ou uma categoria)
+  const [groupDetail, setGroupDetail] = useState<{ by: 'pessoa' | 'categoria'; label: string } | null>(null)
+  const closeGroup = useCallback(() => setGroupDetail(null), [])
 
   const load = useCallback(async () => {
     const session = loadMesaSession(branchId, table)
@@ -181,7 +184,15 @@ export default function MesaContaErp({ branchId, table, tableName }: {
                       : <p className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>{g.label}</p>}
                     <p className="text-xs mt-0.5" style={{ color: 'var(--text-lo)' }}>{g.count} {g.count === 1 ? 'item' : 'itens'}</p>
                   </div>
-                  <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--text-hi)' }}>{formatCurrency(g.total)}</span>
+                  <div className="flex flex-col items-end justify-between gap-2 flex-shrink-0">
+                    <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--text-hi)' }}>{formatCurrency(g.total)}</span>
+                    <button type="button" onClick={() => setGroupDetail({ by: view === 'pessoa' ? 'pessoa' : 'categoria', label: g.label })}
+                      aria-label={`Detalhes de ${g.label}`}
+                      className="text-xs px-2.5 py-1 font-semibold rounded-lg border"
+                      style={{ color: 'var(--text-hi)', borderColor: 'var(--border)', background: 'var(--bg-page)' }}>
+                      Detalhes
+                    </button>
+                  </div>
                 </div>
               )))}
           </div>
@@ -214,6 +225,7 @@ export default function MesaContaErp({ branchId, table, tableName }: {
           </div>
         </>
       )}
+      <GroupDetail group={groupDetail} itens={bill?.itens ?? []} colorOf={colorOf} isMe={isMe} onClose={closeGroup} />
       <ItemDetail item={detail} color={detail ? colorOf(billPersonLabel(detail)) : STAFF_PILL}
         me={!!detail && isMe(detail.nomeCliente)} onClose={closeDetail} />
     </div>
@@ -272,12 +284,9 @@ function ItemTree({ item, colorOf, isMe, onDetail }: {
                   {kid.observacao && <p className="text-[11px]" style={{ color: 'var(--text-lo)' }}>{kid.observacao}</p>}
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-[13px] whitespace-nowrap" style={{ color: 'var(--text-hi)' }}>
-                  {kid.valorTotal > 0 ? formatCurrency(kid.valorTotal) : 'incluso'}
-                </span>
-                <DetailButton item={kid} onDetail={onDetail} small />
-              </div>
+              <span className="text-[13px] whitespace-nowrap flex-shrink-0" style={{ color: 'var(--text-hi)' }}>
+                {kid.valorTotal > 0 ? formatCurrency(kid.valorTotal) : 'incluso'}
+              </span>
             </li>
           ))}
           <li className="flex justify-between text-xs font-semibold pt-1.5 border-t" style={{ borderColor: 'var(--border)', color: 'var(--text-hi)' }}>
@@ -290,10 +299,10 @@ function ItemTree({ item, colorOf, isMe, onDetail }: {
   )
 }
 
-function DetailButton({ item, onDetail, small }: { item: MesaBillItem; onDetail: (i: MesaBillItem) => void; small?: boolean }) {
+function DetailButton({ item, onDetail }: { item: MesaBillItem; onDetail: (i: MesaBillItem) => void }) {
   return (
     <button type="button" onClick={() => onDetail(item)} aria-label={`Detalhes de ${item.descricao}`}
-      className={`${small ? 'text-[11px] px-2 py-0.5' : 'text-xs px-2.5 py-1'} font-semibold rounded-lg border`}
+      className="text-xs px-2.5 py-1 font-semibold rounded-lg border"
       style={{ color: 'var(--text-hi)', borderColor: 'var(--border)', background: 'var(--bg-page)' }}>
       Detalhes
     </button>
@@ -307,6 +316,96 @@ function PersonPill({ label, color, me }: { label: string; color: PillColor; me:
       style={{ background: color.bg, color: color.fg }}>
       {label}{me && <span className="font-semibold opacity-80">· você</span>}
     </span>
+  )
+}
+
+/**
+ * Detalhes de um grupo: as vendas de UMA pessoa, ou os produtos de UMA categoria
+ * com quem lançou cada um. Os valores somam o total do grupo na lista.
+ */
+function GroupDetail({ group, itens, colorOf, isMe, onClose }: {
+  group: { by: 'pessoa' | 'categoria'; label: string } | null
+  itens: MesaBillItem[]
+  colorOf: (label: string) => PillColor
+  isMe: (name: string | null) => boolean
+  onClose: () => void
+}) {
+  useEffect(() => {
+    if (!group) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
+  }, [group, onClose])
+
+  if (!group) return null
+
+  const entries = groupEntries(itens, group.by, group.label)
+  const total = Math.round(entries.reduce((acc, e) => acc + e.item.valorTotal, 0) * 100) / 100
+  const byPerson = group.by === 'pessoa'
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center"
+      style={{ background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(2px)' }}
+      onClick={onClose} role="dialog" aria-modal="true" aria-label={`Detalhes de ${group.label}`}>
+      <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl px-6 pt-5 flex flex-col"
+        style={{ background: 'var(--bg-card)', maxHeight: '85vh', paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' }}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="w-10 h-1 rounded-full mb-4 mx-auto sm:hidden flex-shrink-0" style={{ background: 'var(--border)' }} />
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-lo)' }}>
+          {byPerson ? 'Pedidos de' : 'Categoria'}
+        </p>
+        <div className="mt-1 flex-shrink-0">
+          {byPerson
+            ? <PersonPill label={group.label} color={colorOf(group.label)} me={isMe(group.label)} />
+            : <h2 className="text-lg font-bold" style={{ color: 'var(--text-hi)' }}>{group.label}</h2>}
+        </div>
+
+        <ul className="mt-4 overflow-y-auto flex flex-col divide-y" style={{ borderColor: 'var(--border)' }}>
+          {entries.length === 0 && (
+            <li className="py-6 text-center text-sm" style={{ color: 'var(--text-lo)' }}>Nenhum item.</li>
+          )}
+          {entries.map(({ item, parent }) => {
+            const who = billPersonLabel(item)
+            return (
+              <li key={item.id} className="py-2.5 flex justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>
+                    {formatQuantity(item.quantidade)} {item.descricao}
+                  </p>
+                  {parent && (
+                    <p className="text-[11px]" style={{ color: 'var(--text-lo)' }}>└─ dentro de {parent.descricao}</p>
+                  )}
+                  {item.observacao && <p className="text-xs" style={{ color: 'var(--text-lo)' }}>{item.observacao}</p>}
+                  <p className="text-xs mt-1 flex flex-wrap items-center gap-x-2 gap-y-1" style={{ color: 'var(--text-lo)' }}>
+                    {byPerson
+                      ? <span>{item.categoria}</span>
+                      : <PersonPill label={who} color={colorOf(who)} me={isMe(item.nomeCliente)} />}
+                    {item.horaLancamento && <span>{item.horaLancamento}</span>}
+                  </p>
+                </div>
+                <span className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--text-hi)' }}>
+                  {formatCurrency(item.valorTotal)}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+
+        <div className="mt-3 pt-3 border-t flex justify-between items-center flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
+          <span className="font-semibold" style={{ color: 'var(--text-hi)' }}>
+            Total · {entries.length} {entries.length === 1 ? 'item' : 'itens'}
+          </span>
+          <span className="text-lg font-bold" style={{ color: 'var(--text-hi)' }}>{formatCurrency(total)}</span>
+        </div>
+        <button onClick={onClose} className="mt-4 w-full py-3.5 rounded-xl text-white font-semibold text-sm flex-shrink-0"
+          style={{ backgroundColor: 'var(--color-brand)' }}>
+          Fechar
+        </button>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
