@@ -30,6 +30,28 @@ describe('QuestionCard', () => {
     expect(markup).not.toContain('Sugestão')
   })
 
+  it('mostra a composição de cada opção como tags, só nas que têm', () => {
+    const markup = html(question({ options: ['Franbacon', 'Coca Zero'], details: [['Pão', 'Frango', 'Bacon'], []] }))
+    for (const tag of ['Pão', 'Frango', 'Bacon']) expect(markup).toContain(`>${tag}</span>`)
+    expect(markup.match(/rounded-full/g)).toHaveLength(3)
+    expect(html(question()).match(/rounded-full/g)).toBeNull()
+  })
+
+  it('mostra o preço ao lado de cada produto, na ordem recebida', () => {
+    const markup = html(question({ options: ['Combo Barato', 'Combo Caro'], prices: ['R$ 24,90', 'R$ 39,90'] }))
+    expect(markup.indexOf('R$ 24,90')).toBeGreaterThan(-1)
+    expect(markup.indexOf('R$ 24,90')).toBeLessThan(markup.indexOf('R$ 39,90'))
+  })
+
+  it('em promoção mostra o preço "de" riscado e o "para"; fora dela, só o preço', () => {
+    const markup = html(question({ options: ['Combo Promo', 'Combo Normal'], prices: ['R$ 24,90', 'R$ 30,00'], original_prices: ['R$ 29,90', ''] }))
+    expect(markup).toContain('<s ')
+    expect(markup.match(/<s /g)).toHaveLength(1)
+    expect(markup).toContain('>R$ 29,90</s>')
+    expect(markup).toContain('R$ 24,90')
+    expect(markup.indexOf('R$ 29,90')).toBeLessThan(markup.indexOf('R$ 24,90'))
+  })
+
   it('marca a opção escolhida (índice 0 inclusive)', () => {
     const markup = html(question(), 0)
     expect(markup.match(/aria-checked="true"/g)).toHaveLength(1)

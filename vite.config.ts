@@ -48,16 +48,19 @@ const PWA_IN_DEV = process.env.VITE_PWA_DEV === 'true'
  *
  * - `/api/totem-handoffs` → `DEV_PROXY_LOCAL_API` (Laravel local, enquanto as
  *   rotas novas não estão em produção)
+ * - `/api/v1/voice-order` → `DEV_PROXY_VOICE_API` quando definida; caso contrário,
+ *   `DEV_PROXY_API` (a API remota)
  * - todo o resto de `/api` → `DEV_PROXY_API` (a API de verdade)
  */
 function devProxy(env: Record<string, string>): Record<string, ProxyOptions> | undefined {
   const remote = env.DEV_PROXY_API
   if (!remote) return undefined
   const local = env.DEV_PROXY_LOCAL_API
+  const voice = env.DEV_PROXY_VOICE_API || remote
 
   return {
     ...(local ? { '/api/totem-handoffs': { target: local, changeOrigin: true } } : {}),
-    ...(local ? { '/api/v1/voice-order': { target: local, changeOrigin: true } } : {}),
+    '/api/v1/voice-order': { target: voice, changeOrigin: true },
     '/api': { target: remote, changeOrigin: true },
   }
 }

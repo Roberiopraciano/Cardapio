@@ -46,9 +46,12 @@ export default function Checkout() {
   const [couponLoading, setCouponLoading] = useState(false)
   const [confirmModality, setConfirmModality] = useState(false)
   const [pinOpen, setPinOpen] = useState(false)
+  const [paymentKey, setPaymentKey] = useState<string | null>(null)
   // undefined = consultando; null = mesa sem número cadastrado
   const [tableNumber, setTableNumber] = useState<number | null | undefined>(undefined)
   const [openedAt] = useState(() => new Date())
+  // Um id por abertura do checkout: reenviar depois de falha de rede não duplica o pedido
+  const [clientOrderId] = useState(() => crypto.randomUUID())
   const mode = params?.mode ?? 'mesa'
   const packagingTotal = calcPackagingTotal(items)
 
@@ -68,9 +71,14 @@ export default function Checkout() {
         ? branch.settingsWeb.totemPaymentEnabled
         : cardapioHandoffEnabled === true
 
-  /** Formas marcadas na API para esta modalidade — por enquanto só aparecem em "Fechar conta" (desabilitado). */
+  /** Formas marcadas na API para esta modalidade — no balcão são escolhidas aqui; mesa e delivery ainda só em "Fechar conta" (desabilitado). */
   const methodOptions = paymentOptionsFor(channelConfig)
   const otherMethods = methodOptions.filter((m) => m.key !== 'totem')
+  // No balcão a forma é escolhida aqui e vai no pedido; mesa e delivery seguem em "Fechar conta"
+  const pickPayment = mode === 'balcao' && otherMethods.length > 0
+  // Como na mesa, "Pagar no totem" convive com as outras formas: aqui é uma escolha
+  // como as demais e o pedido segue normal, só registrando a forma.
+  const selectedPayment = methodOptions.find((m) => m.key === paymentKey)
   const closeBillLabels = [
     ...methodOptions.map((m) => m.label),
     // Cadastro antigo: totem liberado pela regra global, sem a forma no canal
@@ -79,7 +87,9 @@ export default function Checkout() {
   // A mesa SEMPRE envia o pedido. Nas demais, "Pagar no totem" só conduz o pedido
   // (QR Code) quando é a única forma cadastrada; com outras formas, enviar o
   // pedido não cobra nada.
-  const viaTotem = mode !== 'mesa' && totemAvailable && otherMethods.length === 0
+  // No balcão, com outras formas ao lado, o QR só sai se o cliente escolher o totem.
+  const viaTotem = mode !== 'mesa' && totemAvailable
+    && (otherMethods.length === 0 || (pickPayment && selectedPayment?.key === 'totem'))
 
   /** PIN ao enviar o pedido: só na mesa, e não no totem (lá quem confirma é o TEF). */
   const pinEnabled = mode === 'mesa' && branch?.settingsWeb?.usePinOnPayment === true
@@ -267,6 +277,12 @@ export default function Checkout() {
       setError(`Informe o número da sua ${comandaLabel.toLowerCase()}.`)
       return
     }
+    if (pickPayment && !selectedPayment) {
+      const msg = 'Escolha a forma de pagamento.'
+      setError(msg)
+      toast.error(msg)
+      return
+    }
     if (pinEnabled && !viaTotem && tableNumber === undefined) {
       setError('Aguarde um instante e confirme de novo.')
       return
@@ -383,8 +399,10 @@ export default function Checkout() {
         note: orderNote,
         mode, whereConsume,
         payVia: viaTotem ? 'totem' : 'local',
+        payment: pickPayment ? selectedPayment : undefined,
         tmProduto,
         coupon: appliedCoupon,
+        clientOrderId,
       })
 
       const historyItems = items.map((item) => ({
@@ -682,7 +700,34 @@ export default function Checkout() {
         </div>
 
         {/* Fechar conta — as formas de pagamento moram aqui; ainda desabilitado */}
-        {closeBillLabels.length > 0 && !viaTotem && (
+        {pickPayment && (
+          <div role="radiogroup" aria-label="Forma de pagamento" className="rounded-2xl p-4 border"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-hi)' }}>Forma de pagamento</p>
+            <div className="flex flex-wrap gap-2">
+              {methodOptions.map((m) => {
+                const selected = m.key === paymentKey
+                return (
+                  <button key={m.key} type="button" role="radio" aria-checked={selected}
+                    onClick={() => setPaymentKey(m.key)}
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold border active:scale-[0.98] transition-transform"
+                    style={{
+                      background: selected ? 'var(--color-brand)' : 'var(--bg-card)',
+                      color: selected ? '#fff' : 'var(--text-hi)',
+                      borderColor: selected ? 'var(--color-brand)' : 'var(--border)',
+                    }}>
+                    {m.label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs mt-2" style={{ color: 'var(--text-lo)' }}>
+              O pagamento é feito no balcão, na retirada do pedido.
+            </p>
+          </div>
+        )}
+
+        {!pickPayment && closeBillLabels.length > 0 && !viaTotem && (
           <button type="button" disabled aria-disabled="true"
             className="w-full text-left rounded-2xl p-4 border opacity-60 cursor-not-allowed"
             style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>

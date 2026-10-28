@@ -5,13 +5,14 @@ import { confirmVoiceReview, type VoiceItem, type VoiceQuestion, type VoiceRevie
 import { useAudioRecorder } from '../../hooks/useAudioRecorder'
 import { useVoiceConversation } from '../../hooks/useVoiceConversation'
 import {
-  canContinue, errorMessage, exampleOrders, isRetryable, statusMessage, summaryTotal,
+  addToCartErrorCode, canContinue, errorMessage, exampleOrders, isRetryable, statusMessage, summaryTotal,
   toAnswers, visibleChat, type Selection,
 } from '../../lib/voiceConversation'
 import ConfirmModal from '../ConfirmModal'
 import Icon from '../Icon'
 import OrderSummary from './OrderSummary'
 import QuestionCard from './QuestionCard'
+import VoiceWave from './VoiceWave'
 import VoiceOrderReviewModal from './VoiceOrderReviewModal'
 
 interface Props {
@@ -199,13 +200,15 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
         setNotice('Preço ou disponibilidade mudaram no cardápio. Atualizei o resumo: confira e confirme de novo.')
         return
       }
-      if (result.status !== 'confirmed' || !result.items) throw new Error('CHANGED')
+      if (result.status !== 'confirmed' || !result.items) throw new Error('Produto alterado')
       onAdd(result.items)
       setManual(null)
       onClose()
-    } catch {
-      fail('CHANGED')
-      throw new Error('CHANGED')
+    } catch (failure) {
+      console.warn('[pedido por voz] não foi possível adicionar ao carrinho', failure)
+      const code = addToCartErrorCode(failure)
+      fail(code)
+      throw new Error(code)
     } finally {
       setConfirming(false)
     }
@@ -342,8 +345,10 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
           {recorder.recording ? (
             <div className="flex items-center gap-3 rounded-2xl px-3 py-2" style={{ background: 'var(--bg-input)' }} role="status">
               <span aria-hidden="true" className="w-3 h-3 rounded-full voice-pulse" style={{ background: 'var(--color-brand)' }} />
-              <span className="flex-1 text-sm font-medium" style={{ color: 'var(--text-hi)' }}>
-                Ouvindo… {seconds}s / {MAX_RECORDING_SECONDS}s
+              <span className="sr-only">Ouvindo…</span>
+              <VoiceWave analyser={recorder.analyser} />
+              <span className="text-xs font-medium tabular-nums whitespace-nowrap" style={{ color: 'var(--text-hi)' }}>
+                {seconds}s / {MAX_RECORDING_SECONDS}s
               </span>
               <button type="button" onClick={() => void cancelRecording()} className="voice-focus min-h-11 px-3 text-sm font-semibold" style={{ color: 'var(--text-lo)' }}>Cancelar</button>
               <button type="button" onClick={() => void toggleRecording()} className="voice-focus min-h-11 rounded-xl px-4 text-sm font-bold text-white" style={{ background: 'var(--color-brand)' }}>Enviar</button>

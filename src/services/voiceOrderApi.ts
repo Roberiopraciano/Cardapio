@@ -89,6 +89,12 @@ export interface VoiceQuestion {
   kind: 'choice' | 'suggestion'
   question: string
   options: string[]
+  /** Tags da composição de cada opção ("Pão", "Bacon"...), na mesma ordem de options; ausente quando não há. */
+  details?: string[][]
+  /** Preço de cada opção quando a pergunta é sobre produtos ("R$ 29,90"), na mesma ordem de options. */
+  prices?: string[]
+  /** Preço "de" (riscado) dos produtos em promoção; vazio nos demais. `prices` traz o "para". */
+  original_prices?: string[]
   optional: boolean
 }
 

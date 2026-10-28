@@ -52,6 +52,8 @@ export interface OrderPayloadInput {
   payment?: { key: string; label: string; prepaid: boolean; pdvCode?: string }
   tmProduto?: number
   coupon?: Offer | null
+  /** UUID do envio: o mesmo em cada retentativa, para o backend não duplicar o pedido. */
+  clientOrderId?: string
 }
 
 /** Complemento como o totem manda — ver o comentário do arquivo. */
@@ -102,6 +104,7 @@ export function buildOrderPayload(i: OrderPayloadInput) {
     totemVersion: CARDAPIO_VERSION,
     consumptioncode: i.consumptioncode,
     consumptionint: i.consumptionint,
+    ...(i.clientOrderId ? { clientOrderId: i.clientOrderId } : {}),
     locationType: locationTypeFor(i.mode),
     amount: i.total,
     subtotal: i.subtotal,

@@ -22,6 +22,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   NOTHING_HEARD: 'Não ouvi nada. Fale mais perto do aparelho ou escreva seu pedido.',
   NETWORK: 'Sem conexão. Confira a internet e tente de novo.',
   CHANGED: 'O cardápio mudou desde que montamos o pedido. Confira os itens de novo.',
+  RATE_LIMITED: 'Muitas tentativas seguidas. Aguarde alguns segundos e tente de novo.',
 }
 
 export function errorMessage(code: string): string {
@@ -34,6 +35,7 @@ export function errorCode(error: unknown): string {
   if (error instanceof TypeError) return 'NETWORK'
   const message = error instanceof Error ? error.message : ''
   // 401 = token da sessão venceu; 404 = a conversa venceu ou nunca existiu
+  if (message === 'HTTP 429') return 'RATE_LIMITED'
   if (message === 'HTTP 401' || message === 'HTTP 404' || message === 'INVALID_CONVERSATION') return 'SESSION_EXPIRED'
   return message in ERROR_MESSAGES ? message : 'VOICE_ORDER_UNAVAILABLE'
 }
@@ -131,4 +133,12 @@ export function exampleOrders(products: Product[]): string[] {
     .map(product => product.name)
   if (names.length < 2) return []
   return [`Quero um ${names[0]}`, `Um ${names[0]} e um ${names[1]}`]
+}
+
+/** Falhas da conferência local do pedido (cardápio do app x servidor): só estas significam "o cardápio mudou". */
+const MENU_MISMATCH = ['Produto alterado', 'Opcional alterado', 'Preço alterado']
+
+/** Código do erro ao adicionar ao carrinho: "cardápio mudou" só quando foi isso; senão a causa real (rede, limite, sessão). */
+export function addToCartErrorCode(error: unknown): string {
+  return error instanceof Error && MENU_MISMATCH.includes(error.message) ? 'CHANGED' : errorCode(error)
 }

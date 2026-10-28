@@ -25,8 +25,12 @@ export default function QuestionCard({ question, selected, disabled, onPick, onS
       <p className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>{question.question}</p>
       <div role="radiogroup" aria-label={question.question} className={`grid gap-2 ${scrolls ? 'max-h-60 overflow-y-auto pr-1' : ''}`}>
         {question.options.map((label, index) => {
-          const { name, extra } = splitOptionPrice(label)
+          const split = splitOptionPrice(label)
+          const name = split.name
+          const extra = split.extra ?? (question.prices?.[index] || null)
           const active = selected === index
+          const tags = question.details?.[index] ?? []
+          const original = question.original_prices?.[index] || null
           return (
             <button
               key={`${index}-${label}`}
@@ -40,8 +44,30 @@ export default function QuestionCard({ question, selected, disabled, onPick, onS
                 ? { background: 'var(--color-brand)' }
                 : { background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-hi)' }}
             >
-              <span>{name}</span>
-              {extra && <span className="shrink-0 text-xs font-semibold" style={active ? undefined : { color: 'var(--text-lo)' }}>{extra}</span>}
+              <span className="block min-w-0">
+                {name}
+                {tags.length > 0 && (
+                  <span className="mt-1 flex flex-wrap gap-1">
+                    {tags.map(tag => (
+                      <span
+                        key={tag}
+                        className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                        style={active
+                          ? { background: 'rgba(255,255,255,0.22)' }
+                          : { background: 'var(--bg-input)', color: 'var(--text-lo)' }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
+              {extra && (
+                <span className="shrink-0 flex flex-col items-end text-xs font-semibold" style={active ? undefined : { color: 'var(--text-lo)' }}>
+                  {original && <s className="font-normal opacity-70" aria-label={`de ${original}`}>{original}</s>}
+                  <span aria-label={original ? `por ${extra}` : undefined}>{extra}</span>
+                </span>
+              )}
             </button>
           )
         })}
