@@ -9,7 +9,9 @@ import { AssistantSpeaker, readSpeechPref, writeSpeechPref, type SpeechPref } fr
 export function useAssistantVoice(token: string, conversationId: string | null) {
   const [pref, setPref] = useState<SpeechPref>(readSpeechPref)
   const [speaking, setSpeaking] = useState(false)
-  const [speaker] = useState(() => new AssistantSpeaker(typeof Audio === 'undefined' ? null : new Audio(), setSpeaking))
+  /** Rodada ("conversa:fala") cuja fala já começou, ou que não vai ter fala: a tela mostra as opções dela. */
+  const [started, setStarted] = useState<string | null>(null)
+  const [speaker] = useState(() => new AssistantSpeaker(typeof Audio === 'undefined' ? null : new Audio(), setSpeaking, setStarted))
   // Frases de espera já baixadas: da segunda vez em diante tocam na hora, sem esperar a rede
   const [fillers] = useState(() => new Map<number, Promise<Blob>>())
 
@@ -18,7 +20,7 @@ export function useAssistantVoice(token: string, conversationId: string | null) 
   const unlock = useCallback(() => speaker.unlock(), [speaker])
   const speak = useCallback((speechId: number) => {
     if (!token || !conversationId) return
-    void speaker.speak(() => fetchVoiceSpeech(token, conversationId, speechId))
+    void speaker.speak(() => fetchVoiceSpeech(token, conversationId, speechId), `${conversationId}:${speechId}`)
   }, [speaker, token, conversationId])
   /** Frase de espera número `turn` (gira pela lista do servidor), tocada enquanto a resposta fica pronta. */
   const filler = useCallback((turn: number) => {
@@ -41,5 +43,5 @@ export function useAssistantVoice(token: string, conversationId: string | null) 
     else speaker.stop()
   }, [speaker])
 
-  return { pref, speaking, unlock, speak, filler, stop, choose }
+  return { pref, speaking, started, unlock, speak, filler, stop, choose }
 }

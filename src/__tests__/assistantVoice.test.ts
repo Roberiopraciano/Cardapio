@@ -134,3 +134,45 @@ describe('frase de espera', () => {
     expect(other.play).not.toHaveBeenCalled()
   })
 })
+
+describe('aviso de "a fala começou" (a tela mostra as opções nessa hora)', () => {
+  it('avisa quando a fala da rodada começa a tocar', async () => {
+    const started = vi.fn()
+    await new AssistantSpeaker(fakePlayer(), vi.fn(), started).speak(async () => wav(), 'c1:1')
+    expect(started).toHaveBeenCalledWith('c1:1')
+  })
+
+  it('atrás da frase de espera, só avisa quando a fala de verdade começa', async () => {
+    const player = fakePlayer()
+    const started = vi.fn()
+    const speaker = new AssistantSpeaker(player, vi.fn(), started)
+    await speaker.filler(async () => wav())
+    await speaker.speak(async () => wav(), 'c1:2')
+    expect(started).not.toHaveBeenCalled()
+    player.onended?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(started).toHaveBeenCalledWith('c1:2')
+  })
+
+  it('sem nada a dizer ou com falha, avisa assim mesmo (as opções não ficam presas)', async () => {
+    const started = vi.fn()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const speaker = new AssistantSpeaker(fakePlayer(), vi.fn(), started)
+    await speaker.speak(async () => null, 'c1:3')
+    await speaker.speak(async () => { throw new Error('HTTP 503') }, 'c1:4')
+    expect(started.mock.calls).toEqual([['c1:3'], ['c1:4']])
+    warn.mockRestore()
+  })
+
+  it('fala atrasada de uma rodada velha não avisa nada', async () => {
+    const started = vi.fn()
+    const speaker = new AssistantSpeaker(fakePlayer(), vi.fn(), started)
+    let release!: (blob: Blob) => void
+    const old = speaker.speak(() => new Promise<Blob>(resolve => { release = resolve }), 'c1:5')
+    await speaker.speak(async () => wav(), 'c1:6')
+    release(wav())
+    await old
+    expect(started.mock.calls).toEqual([['c1:6']])
+  })
+})

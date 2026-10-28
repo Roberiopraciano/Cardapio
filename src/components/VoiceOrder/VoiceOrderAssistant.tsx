@@ -44,6 +44,8 @@ function Bubble({ role, children }: { role: 'user' | 'assistant'; children: stri
 }
 
 const THINKING_INTERVAL_MS = 1800
+/** Com a voz ligada, as opções esperam a fala começar; passado isto, aparecem mesmo sem áudio (rede lenta, TTS fora). */
+const MAX_HOLD_MS = 7000
 
 /** Indicador de "pensando" com a mensagem trocando a cada poucos segundos (para na última). */
 function Thinking({ steps }: { steps: string[] }) {
@@ -184,6 +186,16 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
     speak(speechId)
   }, [voiceOn, recorder.recording, speechId, conversation?.conversation_id, speak, stopSpeaking])
 
+  // Com a voz ligada, as opções da rodada aparecem quando a fala dela começa (não antes, em silêncio).
+  const speechKey = conversation && speechId !== null ? `${conversation.conversation_id}:${speechId}` : null
+  const [gaveUp, setGaveUp] = useState<string | null>(null)
+  useEffect(() => {
+    if (!voiceOn || !speechKey) return
+    const timer = setTimeout(() => setGaveUp(speechKey), MAX_HOLD_MS)
+    return () => clearTimeout(timer)
+  }, [voiceOn, speechKey])
+  const holding = voiceOn && !recorder.recording && !error && speechKey !== null && voice.started !== speechKey && gaveUp !== speechKey
+
   // Frase de espera de cada vez nova. Na primeira mensagem o token chega um instante depois (abre a sessão): toca então.
   const fillerTurn = useRef(0)
   useEffect(() => {
@@ -203,7 +215,7 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
   const messageCount = conversation?.chat.length ?? 0
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: 'end' })
-  }, [messageCount, busy, outgoing, error, notice, conversation?.status])
+  }, [messageCount, busy, holding, outgoing, error, notice, conversation?.status])
 
   const toggleRecording = async () => {
     if (busy) return
@@ -356,13 +368,14 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
 
           {chat.map((message, index) => <Bubble key={`${index}-${message.role}`} role={message.role}>{message.text}</Bubble>)}
           {outgoing && <Bubble role="user">{outgoing}</Bubble>}
-          {busy && <Thinking key={conversation ? 'reply' : 'first'} steps={thinkingSteps(!conversation, startedByVoice)} />}
+          {/* Uma espera só, do envio até a fala começar: a mesma sequência de mensagens, sem reiniciar no meio */}
+          {(busy || holding) && <Thinking key={turn} steps={thinkingSteps(turn <= 1, startedByVoice)} />}
 
-          {!busy && questions.length > 0 && (
+          {!busy && !holding && questions.length > 0 && (
             <QuestionStep key={stepKey} questions={questions} busy={busy} visuals={visuals} onSubmit={answer} />
           )}
 
-          {!busy && closing && <Bubble role="assistant">{closing}</Bubble>}
+          {!busy && !holding && closing && <Bubble role="assistant">{closing}</Bubble>}
           {notice && <Bubble role="assistant">{notice}</Bubble>}
 
           {error && (

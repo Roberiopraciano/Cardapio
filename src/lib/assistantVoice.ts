@@ -44,13 +44,16 @@ export class AssistantSpeaker {
   private unlocked = false
   private url: string | null = null
   private playing: 'filler' | 'speech' | null = null
-  private queued: Blob | null = null
+  private queued: { blob: Blob; tag: string } | null = null
   private player: Player | null
   private onSpeaking: (speaking: boolean) => void
+  private onStarted: (tag: string) => void
 
-  constructor(player: Player | null, onSpeaking: (speaking: boolean) => void) {
+  /** `onStarted(tag)`: a fala daquela rodada começou a tocar, ou não vai tocar (falhou, veio vazia). A tela usa para mostrar as opções. */
+  constructor(player: Player | null, onSpeaking: (speaking: boolean) => void, onStarted: (tag: string) => void = () => undefined) {
     this.player = player
     this.onSpeaking = onSpeaking
+    this.onStarted = onStarted
     if (player) player.onended = () => this.ended()
   }
 
@@ -75,15 +78,16 @@ export class AssistantSpeaker {
   }
 
   /** Busca e toca a fala da rodada; espera a frase de espera acabar, se ela estiver tocando. */
-  async speak(load: () => Promise<Blob | null>): Promise<void> {
+  async speak(load: () => Promise<Blob | null>, tag = ''): Promise<void> {
     const mine = ++this.ticket
     try {
       const blob = await load()
-      if (mine !== this.ticket || !blob) return
-      if (this.playing === 'filler') { this.queued = blob; return }
-      await this.play(blob, 'speech', mine)
+      if (mine !== this.ticket) return
+      if (!blob) { this.onStarted(tag); return }
+      if (this.playing === 'filler') { this.queued = { blob, tag }; return }
+      await this.play(blob, 'speech', mine, tag)
     } catch (failure) {
-      if (mine === this.ticket) this.idle()
+      if (mine === this.ticket) { this.idle(); this.onStarted(tag) }
       console.warn('[assistente] não foi possível falar', failure)
     }
   }
@@ -100,8 +104,8 @@ export class AssistantSpeaker {
     this.release()
   }
 
-  private async play(blob: Blob, kind: 'filler' | 'speech', mine: number): Promise<void> {
-    if (!this.player) return
+  private async play(blob: Blob, kind: 'filler' | 'speech', mine: number, tag = ''): Promise<void> {
+    if (!this.player) { if (kind === 'speech') this.onStarted(tag); return }
     this.release()
     this.url = URL.createObjectURL(blob)
     this.player.src = this.url
@@ -112,6 +116,9 @@ export class AssistantSpeaker {
     } catch (failure) {
       if (mine === this.ticket) this.idle()
       throw failure
+    } finally {
+      // Começou (ou o navegador recusou tocar): as opções podem aparecer
+      if (kind === 'speech' && mine === this.ticket) this.onStarted(tag)
     }
   }
 
@@ -119,7 +126,7 @@ export class AssistantSpeaker {
     const next = this.queued
     this.queued = null
     this.playing = null
-    if (next) void this.play(next, 'speech', this.ticket).catch(failure => console.warn('[assistente] não foi possível falar', failure))
+    if (next) void this.play(next.blob, 'speech', this.ticket, next.tag).catch(failure => console.warn('[assistente] não foi possível falar', failure))
     else this.onSpeaking(false)
   }
 
