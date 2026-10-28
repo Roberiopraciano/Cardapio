@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../api/client'
 import { toast } from '../store/toastStore'
 import { useAppStore } from '../store/appStore'
+import { markReviewPromptShown } from '../lib/reviewPrompt'
 
 const COMMENT_MAX = 500
 
@@ -26,9 +27,12 @@ export default function NpsRating({ consumptioncode, delayMs = 3000, onDismiss }
   const [comment, setComment] = useState('')
 
   useEffect(() => {
-    const timer = setTimeout(() => setVisible(true), delayMs)
+    const timer = setTimeout(() => {
+      setVisible(true)
+      markReviewPromptShown(params?.branchId ?? '')
+    }, delayMs)
     return () => clearTimeout(timer)
-  }, [delayMs])
+  }, [delayMs, params?.branchId])
 
   if (!visible) return null
 

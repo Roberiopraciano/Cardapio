@@ -1,6 +1,21 @@
 import type { CardapioPaymentChannel } from '../types'
 
-export type PaymentMethodKey = 'online' | 'card' | 'cash' | 'pix' | 'totem' | 'caixa'
+export type PaymentMethodKey =
+  | 'online' | 'card' | 'cash' | 'pix' | 'totem' | 'caixa'
+  | 'onlinePix' | 'onlineCard' | 'onlineCash'
+
+/**
+ * No delivery as formas se dividem em "Pagar online" e "Pagar na entrega".
+ * Online: a genérica `online` e as três específicas (Pix, Cartão, Dinheiro).
+ * Entrega: card/cash/pix (e, fora do delivery, totem/caixa).
+ */
+export type PaymentGroup = 'online' | 'entrega'
+
+export function paymentGroup(key: PaymentMethodKey): PaymentGroup {
+  return key === 'online' || key === 'onlinePix' || key === 'onlineCard' || key === 'onlineCash'
+    ? 'online'
+    : 'entrega'
+}
 
 export interface PaymentOption {
   key: PaymentMethodKey
@@ -18,6 +33,9 @@ const METHODS: { key: PaymentMethodKey; label: string }[] = [
   { key: 'pix', label: 'Pix' },
   { key: 'totem', label: 'Pagar no totem' },
   { key: 'caixa', label: 'Pagar no caixa' },
+  { key: 'onlinePix', label: 'Pix online' },
+  { key: 'onlineCard', label: 'Cartão online' },
+  { key: 'onlineCash', label: 'Dinheiro online' },
 ]
 
 /**

@@ -550,3 +550,15 @@ Roteiro completo no [`DEPLOY.md`](DEPLOY.md) §6. Os que mais pegam:
 Mesa integrada ao ERP da loja. Só vale em `mode=mesa`. Ligado, o envio do pedido abre a mesa com PIN e
 lança os itens direto no PDV (`api/mesa/*`), em vez de `POST api/orders`; mesa já aberta pelo garçom
 pede para chamar o garçom. Liga-se no painel (Config. Cardápio da filial). Ver `src/lib/mesaErp.ts` e `TotemApiv2/docs/MESA_SERVICE_IMPLEMENTACAO.md` §7.
+
+### Delivery: pagar online x pagar na entrega (`settingsWeb.paymentMethods.delivery`)
+Além de `card`/`cash`/`pix` (pagar **na entrega**), o delivery tem `onlinePix`, `onlineCard` e `onlineCash` (pagar **online**),
+cada um com `prepaid.*`, `names.*` e `pdvCodes.*` como as demais formas. Todos nascem desligados. Com algum ligado, o checkout
+mostra duas seções ("Pagar online" e "Pagar na entrega"/"na retirada"); sem nenhum, só as formas de pagar na entrega.
+Liga-se no painel (Filiais → Modalidades → Delivery → "Pagar online"). Como as demais formas, o `prepaid` ainda é ignorado
+pelo app (o cardápio não cobra). Ver `src/lib/paymentOptions.ts`.
+
+### Avaliação (estrelas) aparece uma vez
+`lib/reviewPrompt.ts`: a pesquisa na confirmação aparece uma vez por aparelho e por loja (chave `nps_shown_<branchId>`, com o
+escopo da empresa). "Agora não" também conta como mostrada.
+

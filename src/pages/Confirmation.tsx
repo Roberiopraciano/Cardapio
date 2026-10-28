@@ -7,6 +7,7 @@ import { statusTrackingEnabled, buildStatusPortalUrl } from '../lib/statusPanel'
 import { tableLabel } from '../lib/tableLabel'
 import Icon from '../components/Icon'
 import NpsRating from '../components/NpsRating'
+import { wasReviewPromptShown } from '../lib/reviewPrompt'
 
 export default function Confirmation() {
   const { state } = useLocation()
@@ -18,7 +19,8 @@ export default function Confirmation() {
   const mode = params?.mode ?? 'mesa'
 
   const [orderStatus, setOrderStatus] = useState<string>('pending')
-  const [showNps, setShowNps] = useState(true)
+  // A avaliação aparece uma vez por aparelho e loja, não a cada pedido (ver lib/reviewPrompt.ts)
+  const [showNps, setShowNps] = useState(() => !wasReviewPromptShown(params?.branchId ?? ''))
 
   /**
    * Acompanhamento só existe se a casa publica status (KDS/PDV movendo o pedido).

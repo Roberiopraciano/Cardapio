@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   adoptClientOrderId, buildMesaItems, classifyMesa, clearMesaSession, erpCode, getMesaClientOrderId,
-  groupBill, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
+  billItemTotal, billOriginLabel, billPersonLabel, isStaffItem, buildPersonColors, flattenBill, groupBill, loadMesaSession, MesaItemError, mesaErrorMessage, parseMesaBill, saveMesaSession, SESSION_MAX_AGE_MS,
 } from '../lib/mesaErp'
 import type { CartItem, Product } from '../types'
 
@@ -189,5 +189,145 @@ describe('conta da mesa (mesa.conta)', () => {
     expect(bill.itens).toEqual([])
     expect(bill.totais.bruto).toBe(0)
     expect(bill.status).toBe('ABERTA')
+  })
+})
+
+describe('cores por pessoa na conta', () => {
+  const { itens } = parseMesaBill(CONTA)
+
+  it('cada pessoa da mesa tem cor própria e o garçom/balcão tem a neutra', () => {
+    const colors = buildPersonColors(itens)
+    const roberio = colors.get('Roberio')!
+    const ana = colors.get('Ana')!
+    const staff = colors.get('Garçom / Balcão')!
+    expect(roberio).not.toEqual(ana)
+    expect(staff).not.toEqual(roberio)
+    expect(staff).not.toEqual(ana)
+  })
+
+  it('é estável: a mesma pessoa mantém a cor quando entram itens novos depois', () => {
+    const antes = buildPersonColors(itens).get('Ana')
+    const depois = buildPersonColors([...itens, { ...itens[0], id: 99, nomeCliente: 'Carlos' }]).get('Ana')
+    expect(depois).toEqual(antes)
+  })
+
+  it('não repete cor entre as 7 primeiras pessoas', () => {
+    const muitos = Array.from({ length: 7 }, (_, n) => ({ ...itens[0], id: n, nomeCliente: `P${n}` }))
+    const cores = [...buildPersonColors(muitos).entries()].filter(([k]) => k !== 'Garçom / Balcão').map(([, c]) => c.bg)
+    expect(new Set(cores).size).toBe(7)
+  })
+
+  it('traduz o canal de origem', () => {
+    expect(billOriginLabel('CARDAPIO_DIGITAL')).toBe('Cardápio digital')
+    expect(billOriginLabel('PDV')).toBe('Garçom / PDV')
+    expect(billOriginLabel(null)).toBe('—')
+  })
+})
+
+// Trecho de uma resposta real de mesa.conta (B99): combo com a bebida dentro, aninhada em `complements`
+const REAL = {
+  success: true,
+  data: {
+    statusDescricao: 'ABERTA',
+    totais: { valorProdutos: 98.7, valorBruto: 98.7, valorTotalPago: 0, saldoRestante: 98.7 },
+    itens: [
+      { id: 672183, seqPro: 1, seqProPai: 0, codigoProduto: 88888888, name: 'SEM COD PDV', descricao: 'SEM COD PDV', categoria: 'PROMO', quantity: 1, quantidade: 1, valorUnitario: 12.9, valorTotal: 12.9, observacao: 'Item 300103', nomeCliente: 'Cleberson', cancelado: false, complements: [] },
+      { id: 672193, seqPro: 11, seqProPai: 0, codigoProduto: 1, descricao: 'Delicia 1', categoria: 'LINHA SUPER', quantidade: 1, valorUnitario: 36, valorTotal: 36, nomeCliente: 'Cleberson', cancelado: false,
+        complements: [{ id: 672194, seqPro: 12, seqProPai: 11, codigoProduto: 100, descricao: 'MIX 300 COCA C', categoria: 'BEBIDAS', quantidade: 1, valorUnitario: 6.9, valorTotal: 6.9, nomeCliente: 'Cleberson', cancelado: false, complements: [] }] },
+      { id: 672195, seqPro: 13, seqProPai: 0, codigoProduto: 1, descricao: 'Delicia 1', categoria: 'LINHA SUPER', quantidade: 1, valorUnitario: 36, valorTotal: 36, nomeCliente: 'Teste 2', cancelado: false,
+        complements: [{ id: 672196, seqPro: 14, seqProPai: 13, codigoProduto: 100, descricao: 'MIX 300 COCA C', categoria: 'BEBIDAS', quantidade: 1, valorUnitario: 6.9, valorTotal: 6.9, nomeCliente: 'Teste 2', cancelado: false, complements: [] }] },
+    ],
+    itensPlano: [],
+    pagamentos: [],
+  },
+}
+
+describe('itens de dentro dos combos em árvore', () => {
+  it('pendura o complemento no item pai e não o repete na lista principal', () => {
+    const { itens } = parseMesaBill(REAL)
+    expect(itens.map((i) => i.descricao)).toEqual(['SEM COD PDV', 'Delicia 1', 'Delicia 1'])
+    expect(itens[1].filhos.map((f) => [f.descricao, f.seqProPai])).toEqual([['MIX 300 COCA C', 11]])
+    expect(itens[0].filhos).toEqual([])
+  })
+
+  it('o total do item soma o que tem dentro (o complemento é cobrado além do pai)', () => {
+    const { itens } = parseMesaBill(REAL)
+    expect(billItemTotal(itens[1])).toBe(42.9)
+    expect(billItemTotal(itens[0])).toBe(12.9)
+  })
+
+  it('por pessoa e por categoria contam os itens de dentro', () => {
+    const { itens } = parseMesaBill(REAL)
+    expect(groupBill(itens, 'pessoa').map((g) => [g.label, g.total])).toEqual([['Teste 2', 42.9], ['Cleberson', 55.8]].sort((a, b) => (b[1] as number) - (a[1] as number)))
+    const cat = Object.fromEntries(groupBill(itens, 'categoria').map((g) => [g.label, g.total]))
+    expect(cat['BEBIDAS']).toBe(13.8)
+    expect(cat['LINHA SUPER']).toBe(72)
+  })
+
+  it('a soma dos grupos bate com o valorProdutos da loja', () => {
+    const { itens, totais } = parseMesaBill(REAL)
+    const soma = groupBill(itens, 'pessoa').reduce((acc, g) => Math.round((acc + g.total) * 100) / 100, 0)
+    expect(soma).toBe(totais.produtos)
+  })
+
+  it('item principal cancelado cancela também o que está dentro dele', () => {
+    const { itens } = parseMesaBill({ success: true, data: { itens: [
+      { id: 1, seqPro: 1, seqProPai: 0, descricao: 'Combo', categoria: 'C', quantidade: 1, valorTotal: 30, cancelado: true,
+        complements: [{ id: 2, seqPro: 2, seqProPai: 1, descricao: 'Refri', categoria: 'B', quantidade: 1, valorTotal: 5, cancelado: false }] },
+    ] } })
+    expect(flattenBill(itens).every((i) => i.cancelado)).toBe(true)
+    expect(billItemTotal(itens[0])).toBe(0)
+    expect(groupBill(itens, 'categoria')).toEqual([])
+  })
+
+  it('lista plana com seqProPai também vira árvore', () => {
+    const { itens } = parseMesaBill({ success: true, data: { itens: [
+      { id: 1, seqPro: 1, seqProPai: 0, descricao: 'Pizza', categoria: 'P', quantidade: 1, valorTotal: 40 },
+      { id: 2, seqPro: 2, seqProPai: 1, descricao: 'Borda', categoria: 'P', quantidade: 1, valorTotal: 8 },
+      { id: 3, seqPro: 3, seqProPai: 0, descricao: 'Suco', categoria: 'B', quantidade: 1, valorTotal: 9 },
+    ] } })
+    expect(itens.map((i) => i.descricao)).toEqual(['Pizza', 'Suco'])
+    expect(itens[0].filhos.map((f) => f.descricao)).toEqual(['Borda'])
+  })
+})
+
+describe('quem lançou o item', () => {
+  const base = { id: 1, descricao: 'Refri', categoria: 'Bebidas', quantidade: 1, valorTotal: 6, cancelado: false }
+
+  it('item do PDV mostra o nome do garçom que a loja informou em quemLancou', () => {
+    const { itens } = parseMesaBill({ success: true, data: { itens: [
+      { ...base, origem: 'PDV', nomeCliente: null, quemLancou: 'Garçom (Marcos Silva)' },
+    ] } })
+    expect(isStaffItem(itens[0])).toBe(true)
+    expect(billPersonLabel(itens[0])).toBe('Garçom (Marcos Silva)')
+  })
+
+  it('só cai no rótulo genérico quando a loja não diz quem foi', () => {
+    const { itens } = parseMesaBill({ success: true, data: { itens: [{ ...base, origem: 'PDV', nomeCliente: null }] } })
+    expect(billPersonLabel(itens[0])).toBe('Garçom / Balcão')
+  })
+
+  it('item do cardápio mostra o cliente, mesmo se quemLancou vier diferente', () => {
+    const { itens } = parseMesaBill({ success: true, data: { itens: [
+      { ...base, origem: 'CARDAPIO_DIGITAL', nomeCliente: 'Ana', quemLancou: 'Ana' },
+      { ...base, id: 2, origem: 'CARDAPIO_DIGITAL', nomeCliente: null, quemLancou: null },
+    ] } })
+    expect(billPersonLabel(itens[0])).toBe('Ana')
+    expect(isStaffItem(itens[1])).toBe(false)
+    expect(billPersonLabel(itens[1])).toBe('Cliente')
+  })
+
+  it('por pessoa separa cada garçom pelo nome, e o atendimento fica no cinza', () => {
+    const { itens } = parseMesaBill({ success: true, data: { itens: [
+      { ...base, id: 1, origem: 'PDV', nomeCliente: null, quemLancou: 'Garçom (Marcos Silva)', valorTotal: 10 },
+      { ...base, id: 2, origem: 'PDV', nomeCliente: null, quemLancou: 'Garçom (Paula)', valorTotal: 20 },
+      { ...base, id: 3, origem: 'CARDAPIO_DIGITAL', nomeCliente: 'Ana', quemLancou: 'Ana', valorTotal: 5 },
+    ] } })
+    expect(groupBill(itens, 'pessoa').map((g) => [g.label, g.total])).toEqual([
+      ['Garçom (Paula)', 20], ['Garçom (Marcos Silva)', 10], ['Ana', 5],
+    ])
+    const colors = buildPersonColors(itens)
+    expect(colors.get('Garçom (Marcos Silva)')).toEqual(colors.get('Garçom (Paula)'))
+    expect(colors.get('Ana')).not.toEqual(colors.get('Garçom (Paula)'))
   })
 })

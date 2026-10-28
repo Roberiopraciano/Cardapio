@@ -228,6 +228,11 @@ export interface MesaBillItem {
   nomeCliente: string | null
   quemLancou: string | null
   origem: string | null
+  /** Sequência do item na venda e do item pai (0 = item principal). */
+  seqPro: number
+  seqProPai: number
+  /** Itens de dentro do combo / adicionais / sabores, já em árvore. */
+  filhos: MesaBillItem[]
 }
 
 export interface MesaBillPayment {
@@ -258,6 +263,66 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? 
 type Rec = Record<string, unknown>
 const rec = (v: unknown): Rec => (v && typeof v === 'object' ? (v as Rec) : {})
 
+function parseBillItem(i: Rec, idx: number): MesaBillItem {
+  return {
+    id: (i['id'] as number | string | undefined) ?? idx,
+    codigoProduto: erpCode(String(i['codigoProduto'] ?? '')),
+    descricao: str(i['descricao']) ?? str(i['name']) ?? 'Item',
+    categoria: str(i['categoria']) ?? 'Outros',
+    quantidade: num(i['quantidade'] ?? i['quantity']),
+    valorUnitario: num(i['valorUnitario'] ?? i['price']),
+    valorTotal: num(i['valorTotal'] ?? i['total']),
+    observacao: str(i['observacao']) ?? str(i['note']),
+    horaLancamento: str(i['horaLancamento']),
+    cancelado: i['cancelado'] === true,
+    nomeCliente: str(i['nomeCliente']),
+    quemLancou: str(i['quemLancou']),
+    origem: str(i['origem']),
+    seqPro: num(i['seqPro']),
+    seqProPai: num(i['seqProPai']),
+    filhos: [],
+  }
+}
+
+/**
+ * Monta a árvore da conta. A loja manda cada item principal com seus
+ * complementos aninhados em `complements`; se vier uma lista plana (só com
+ * `seqProPai`), o filho é pendurado no pai pela sequência.
+ */
+export function buildBillTree(raw: Rec[]): MesaBillItem[] {
+  const roots = raw.map((r, idx) => {
+    const item = parseBillItem(r, idx)
+    const nested = Array.isArray(r['complements']) ? r['complements'] as Rec[]
+      : Array.isArray(r['complementos']) ? r['complementos'] as Rec[] : []
+    item.filhos = buildBillTree(nested)
+    return item
+  })
+
+  // Formato plano: filho solto na lista, apontando para o pai por seqProPai
+  const bySeq = new Map(roots.filter((r) => r.seqPro > 0).map((r) => [r.seqPro, r]))
+  const top: MesaBillItem[] = []
+  for (const r of roots) {
+    const parent = r.seqProPai > 0 ? bySeq.get(r.seqProPai) : undefined
+    if (parent && parent !== r) parent.filhos.push(r)
+    else top.push(r)
+  }
+  return top
+}
+
+/** Todos os itens, pais e filhos, em ordem. Filho de item cancelado também conta como cancelado. */
+export function flattenBill(itens: MesaBillItem[], parentCancelled = false): MesaBillItem[] {
+  return itens.flatMap((i) => {
+    const cancelado = parentCancelled || i.cancelado
+    return [{ ...i, cancelado }, ...flattenBill(i.filhos, cancelado)]
+  })
+}
+
+/** Valor do item com tudo que está dentro dele (o complemento é cobrado além do pai). Cancelado = 0. */
+export function billItemTotal(i: MesaBillItem): number {
+  if (i.cancelado) return 0
+  return Math.round((i.valorTotal + i.filhos.reduce((acc, f) => acc + billItemTotal(f), 0)) * 100) / 100
+}
+
 /** Normaliza a resposta de `POST api/mesa/conta` (online da loja, ou espelho offline da nuvem). */
 export function parseMesaBill(res: Rec): MesaBill {
   const offline = res['origem'] === 'CACHE_OFFLINE_MONGODB'
@@ -275,21 +340,7 @@ export function parseMesaBill(res: Rec): MesaBill {
       bruto: num(t['valorBruto']), pago: num(t['valorTotalPago']), restante: num(t['saldoRestante']),
     }
 
-  const itens = (Array.isArray(d['itens']) ? d['itens'] as Rec[] : []).map((i, idx): MesaBillItem => ({
-    id: (i['id'] as number | string | undefined) ?? idx,
-    codigoProduto: erpCode(String(i['codigoProduto'] ?? '')),
-    descricao: str(i['descricao']) ?? 'Item',
-    categoria: str(i['categoria']) ?? 'Outros',
-    quantidade: num(i['quantidade']),
-    valorUnitario: num(i['valorUnitario']),
-    valorTotal: num(i['valorTotal']),
-    observacao: str(i['observacao']),
-    horaLancamento: str(i['horaLancamento']),
-    cancelado: i['cancelado'] === true,
-    nomeCliente: str(i['nomeCliente']),
-    quemLancou: str(i['quemLancou']),
-    origem: str(i['origem']),
-  }))
+  const itens = buildBillTree(Array.isArray(d['itens']) ? d['itens'] as Rec[] : [])
 
   const pagamentos = (Array.isArray(d['pagamentos']) ? d['pagamentos'] as Rec[] : []).map((p, idx): MesaBillPayment => ({
     id: (p['id'] as number | string | undefined) ?? idx,
@@ -319,9 +370,23 @@ export const BILL_STATUS_LABEL: Record<string, string> = {
   CANCELADA: 'Conta cancelada',
 }
 
-/** Quem lançou o item. Item do PDV (sem nome de cliente) é do garçom/balcão. */
+/**
+ * Item lançado pelo atendimento (garçom/balcão/PDV) e não por um cliente do cardápio.
+ * Canal `PDV`, ou item sem nome de cliente que não veio do cardápio.
+ */
+export function isStaffItem(i: MesaBillItem): boolean {
+  const canal = (i.origem ?? '').toUpperCase()
+  return canal === 'PDV' || (i.nomeCliente === null && canal !== 'CARDAPIO_DIGITAL')
+}
+
+/**
+ * Quem lançou o item, como a loja informou (`quemLancou`): o nome do garçom nos
+ * itens do PDV, o nome do cliente nos do cardápio. Só cai no rótulo genérico
+ * quando a loja não diz quem foi.
+ */
 export function billPersonLabel(i: MesaBillItem): string {
-  return i.nomeCliente ?? 'Garçom / Balcão'
+  if (isStaffItem(i)) return i.quemLancou ?? STAFF_LABEL
+  return i.nomeCliente ?? i.quemLancou ?? 'Cliente'
 }
 
 export interface BillGroup { key: string; label: string; count: number; total: number }
@@ -329,7 +394,8 @@ export interface BillGroup { key: string; label: string; count: number; total: n
 /** Soma por pessoa ou por categoria. Item cancelado não entra. Maior consumo primeiro. */
 export function groupBill(itens: MesaBillItem[], by: 'pessoa' | 'categoria'): BillGroup[] {
   const map = new Map<string, BillGroup>()
-  for (const i of itens) {
+  // Os itens de dentro de combos também contam (a bebida do combo é "Bebidas")
+  for (const i of flattenBill(itens)) {
     if (i.cancelado) continue
     const label = by === 'pessoa' ? billPersonLabel(i) : i.categoria
     const g = map.get(label) ?? { key: label, label, count: 0, total: 0 }
@@ -338,4 +404,52 @@ export function groupBill(itens: MesaBillItem[], by: 'pessoa' | 'categoria'): Bi
     map.set(label, g)
   }
   return [...map.values()].sort((a, b) => b.total - a.total)
+}
+
+// ─── Cores por pessoa na conta ───────────────────────────────────────────────
+
+export interface PillColor { bg: string; fg: string }
+
+/** Pessoas do cardápio: cores distintas, legíveis no tema claro (o app é travado em claro). */
+const PERSON_PALETTE: PillColor[] = [
+  { bg: '#dbeafe', fg: '#1e40af' }, // azul
+  { bg: '#fce7f3', fg: '#9d174d' }, // rosa
+  { bg: '#dcfce7', fg: '#166534' }, // verde
+  { bg: '#ede9fe', fg: '#5b21b6' }, // violeta
+  { bg: '#ffedd5', fg: '#9a3412' }, // laranja
+  { bg: '#cffafe', fg: '#155e75' }, // ciano
+  { bg: '#fef9c3', fg: '#854d0e' }, // amarelo
+]
+
+/** Garçom/balcão: neutro, para nunca ser confundido com um cliente da mesa. */
+export const STAFF_PILL: PillColor = { bg: '#e5e7eb', fg: '#374151' }
+
+export const STAFF_LABEL = 'Garçom / Balcão'
+
+/**
+ * Uma cor por pessoa, na ordem em que aparecem na conta: duas pessoas da mesma
+ * mesa nunca dividem cor (até 7; depois a paleta recomeça). Não é hash do nome
+ * de propósito — hash colide, e a pílula só serve se distinguir quem pediu o quê.
+ */
+export function buildPersonColors(itens: MesaBillItem[]): Map<string, PillColor> {
+  const colors = new Map<string, PillColor>([[STAFF_LABEL, STAFF_PILL]])
+  let next = 0
+  for (const i of itens) {
+    const label = billPersonLabel(i)
+    if (colors.has(label)) continue
+    // Todo o atendimento usa o cinza (cada garçom com o seu nome); cor só para clientes
+    if (isStaffItem(i)) { colors.set(label, STAFF_PILL); continue }
+    colors.set(label, PERSON_PALETTE[next % PERSON_PALETTE.length])
+    next += 1
+  }
+  return colors
+}
+
+/** Canal que lançou o item, em português. */
+export function billOriginLabel(origem: string | null): string {
+  switch ((origem ?? '').toUpperCase()) {
+    case 'CARDAPIO_DIGITAL': return 'Cardápio digital'
+    case 'PDV': return 'Garçom / PDV'
+    default: return origem ?? '—'
+  }
 }

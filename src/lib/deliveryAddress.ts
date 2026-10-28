@@ -87,16 +87,109 @@ export function formatAddress(a: DeliveryAddress): string {
   ].filter(Boolean).join(' - ')
 }
 
-// Conveniência do aparelho: o cliente não redigita o endereço a cada pedido.
-// Sem storage (aba anônima, bloqueio), só não lembra.
-export function loadSavedAddress(): DeliveryAddress | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    return { ...EMPTY_ADDRESS, ...(JSON.parse(raw) as Partial<DeliveryAddress>) }
-  } catch { return null }
+// ─── Endereços salvos no aparelho ────────────────────────────────────────────
+//
+// Conveniência do aparelho: o cliente não redigita o endereço a cada pedido, e
+// pode ter mais de um (casa, trabalho). Sem storage (aba anônima, bloqueio),
+// só não lembra.
+
+export interface SavedAddress extends DeliveryAddress {
+  id: string
 }
 
-export function saveAddress(a: DeliveryAddress): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(a)) } catch { /* sem storage */ }
+export interface AddressBook {
+  list: SavedAddress[]
+  /** Endereço usado no pedido. */
+  selectedId: string | null
+}
+
+/** Passou disso, o mais antigo (que não seja o escolhido) sai. */
+export const MAX_ADDRESSES = 5
+
+const BOOK_KEY = 'cardapio.deliveryAddresses'
+/** Formato antigo: um endereço só. Importado uma vez para a lista nova. */
+const LEGACY_KEY = 'cardapio.deliveryAddress'
+
+export const EMPTY_BOOK: AddressBook = { list: [], selectedId: null }
+
+export function selectedAddress(book: AddressBook): SavedAddress | null {
+  return book.list.find((a) => a.id === book.selectedId) ?? null
+}
+
+/** Mesmo endereço digitado de novo (ignora caixa e espaços) não vira duplicata. */
+function sameAddress(a: DeliveryAddress, b: DeliveryAddress): boolean {
+  const norm = (x: DeliveryAddress) => (Object.keys(EMPTY_ADDRESS) as (keyof DeliveryAddress)[])
+    .map((k) => (k === 'cep' ? cepDigits(x[k]) : x[k]).toLowerCase().replace(/\s+/g, ' ').trim())
+    .join('|')
+  return norm(a) === norm(b)
+}
+
+/**
+ * Salva um endereço novo (`id` null) ou edita um existente, e o deixa escolhido.
+ * Endereço igual a um que já existe reaproveita o existente em vez de duplicar.
+ */
+export function upsertAddress(
+  book: AddressBook,
+  address: DeliveryAddress,
+  id: string | null,
+  newId: () => string = () => crypto.randomUUID(),
+): AddressBook {
+  const { ...fields } = address
+  const duplicate = book.list.find((x) => x.id !== id && sameAddress(x, fields))
+  const targetId = id && book.list.some((x) => x.id === id) ? id : (duplicate?.id ?? null)
+
+  let list: SavedAddress[]
+  let selectedId: string
+  if (targetId) {
+    list = book.list.map((x) => (x.id === targetId ? { ...fields, id: targetId } : x))
+      // Editou um endereço para ficar igual a outro: sobra um só
+      .filter((x, idx, all) => x.id === targetId || !sameAddress(x, fields) || all.findIndex((y) => y.id === targetId) === -1)
+    selectedId = targetId
+  } else {
+    selectedId = newId()
+    list = [...book.list, { ...fields, id: selectedId }]
+  }
+
+  while (list.length > MAX_ADDRESSES) {
+    const drop = list.findIndex((x) => x.id !== selectedId)
+    list = list.filter((_, idx) => idx !== drop)
+  }
+  return { list, selectedId }
+}
+
+export function selectAddress(book: AddressBook, id: string): AddressBook {
+  return book.list.some((a) => a.id === id) ? { ...book, selectedId: id } : book
+}
+
+/** Remove; se era o escolhido, passa a valer o primeiro que sobrar. */
+export function removeAddress(book: AddressBook, id: string): AddressBook {
+  const list = book.list.filter((a) => a.id !== id)
+  const selectedId = book.selectedId === id ? (list[0]?.id ?? null) : book.selectedId
+  return { list, selectedId }
+}
+
+export function loadAddressBook(): AddressBook {
+  try {
+    const raw = localStorage.getItem(BOOK_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<AddressBook>
+      const list = (Array.isArray(parsed.list) ? parsed.list : [])
+        .filter((a): a is SavedAddress => !!a && typeof a.id === 'string')
+        .map((a) => ({ ...EMPTY_ADDRESS, ...a }))
+      const selectedId = list.some((a) => a.id === parsed.selectedId) ? (parsed.selectedId as string) : (list[0]?.id ?? null)
+      return { list, selectedId }
+    }
+    // Primeira vez no formato novo: leva o endereço único que o aparelho já tinha
+    const legacy = localStorage.getItem(LEGACY_KEY)
+    if (legacy) {
+      const book = upsertAddress(EMPTY_BOOK, { ...EMPTY_ADDRESS, ...(JSON.parse(legacy) as Partial<DeliveryAddress>) }, null)
+      saveAddressBook(book)
+      return book
+    }
+  } catch { /* storage bloqueado ou lixo: começa vazio */ }
+  return EMPTY_BOOK
+}
+
+export function saveAddressBook(book: AddressBook): void {
+  try { localStorage.setItem(BOOK_KEY, JSON.stringify(book)) } catch { /* sem storage */ }
 }

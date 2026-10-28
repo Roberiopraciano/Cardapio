@@ -22,7 +22,7 @@ import { saveTotemHandoff } from '../lib/totemHandoff'
 import { buildOrderPayload } from '../lib/orderPayload'
 import { whereConsumeForMode } from '../lib/whereConsume'
 import { readOrderTrackingConfig } from '../lib/orderTracking'
-import { paymentOptionsFor } from '../lib/paymentOptions'
+import { paymentOptionsFor, paymentGroup } from '../lib/paymentOptions'
 import { locationTypeFor } from '../lib/locationType'
 import PinModal from '../components/PinModal'
 import { isPinStillValid, markPinVerified } from '../lib/pin'
@@ -36,12 +36,16 @@ import { tableLabel } from '../lib/tableLabel'
 import CheckoutStepper, { type Step } from '../components/CheckoutStepper'
 import DeliveryAddressModal from '../components/DeliveryAddressModal'
 import {
-  type DeliveryAddress, loadSavedAddress, saveAddress, isAddressComplete, addressLine1, addressLine2,
+  type AddressBook, loadAddressBook, saveAddressBook, selectedAddress, selectAddress, removeAddress, upsertAddress,
+  isAddressComplete, addressLine1, addressLine2,
 } from '../lib/deliveryAddress'
+import DeliveryAddressList from '../components/DeliveryAddressList'
+import { parseMoney, changeForError, changeAmount, brl } from '../lib/cashChange'
 import type { IconName } from '../components/Icon'
 
 const PAYMENT_ICON: Record<string, IconName> = {
   online: 'online', card: 'creditCard', cash: 'cash', pix: 'qrcode', totem: 'qrcode', caixa: 'register',
+  onlinePix: 'qrcode', onlineCard: 'creditCard', onlineCash: 'cash',
 }
 
 export default function Checkout() {
@@ -94,8 +98,17 @@ export default function Checkout() {
 
   /** Delivery: receber no endereço ou retirar na loja. */
   const [fulfillment, setFulfillment] = useState<'entrega' | 'retirada'>('entrega')
-  const [address, setAddress] = useState<DeliveryAddress | null>(() => loadSavedAddress())
+  // Vários endereços salvos no aparelho; o escolhido é o do pedido
+  const [book, setBook] = useState<AddressBook>(() => loadAddressBook())
+  const address = selectedAddress(book)
   const [addressOpen, setAddressOpen] = useState(false)
+  /** Endereço sendo editado no modal; null = adicionando um novo. */
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const persistBook = (next: AddressBook) => { setBook(next); saveAddressBook(next) }
+  const openAddress = (id: string | null = address?.id ?? null) => { setEditingId(id); setAddressOpen(true) }
+  // Delivery em dinheiro: precisa de troco? (null = ainda não respondeu)
+  const [needsChange, setNeedsChange] = useState<boolean | null>(null)
+  const [changeForText, setChangeForText] = useState('')
   const [couponOpen, setCouponOpen] = useState(couponCode !== '')
   const deliverToAddress = mode === 'delivery' && fulfillment === 'entrega'
 
@@ -124,6 +137,13 @@ export default function Checkout() {
   // Como na mesa, "Pagar no totem" convive com as outras formas: aqui é uma escolha
   // como as demais e o pedido segue normal, só registrando a forma.
   const selectedPayment = shownMethods.find((m) => m.key === paymentKey)
+  // Delivery com alguma forma "online" ligada: duas seções (Pagar online / Pagar na entrega).
+  // Nenhuma online ligada: só as formas de pagar na entrega, como sempre.
+  // Delivery pago em dinheiro (na entrega/retirada): pergunta se precisa de troco
+  const askChange = mode === 'delivery' && selectedPayment?.key === 'cash'
+  const onlineMethods = mode === 'delivery' ? shownMethods.filter((m) => paymentGroup(m.key) === 'online') : []
+  const splitPayment = onlineMethods.length > 0
+  const onDeliveryMethods = splitPayment ? shownMethods.filter((m) => paymentGroup(m.key) !== 'online') : shownMethods
   const closeBillLabels = [
     ...methodOptions.map((m) => m.label),
     // Cadastro antigo: totem liberado pela regra global, sem a forma no canal
@@ -190,6 +210,10 @@ export default function Checkout() {
   const subtotal = total()
   const finalTotal = totalWithCoupon()
   const tmProduto = calcTmProduto(items, finalTotal)
+  const changeFor = parseMoney(changeForText)
+  const changeError = !askChange ? null
+    : needsChange === null ? 'Informe se precisa de troco.'
+      : needsChange ? changeForError(changeFor, finalTotal) : null
   const isEmpty = items.length === 0
 
   // Redirect e analytics só no mount — nunca durante o render, senão o
@@ -315,12 +339,16 @@ export default function Checkout() {
   /** Confere a etapa atual antes de avançar; a última envia o pedido. */
   const handleContinue = () => {
     if (step === 'entrega' && deliverToAddress && !isAddressComplete(address)) {
-      setAddressOpen(true)
+      openAddress()
       return
     }
     if (step === 'pagamento' && pickPayment && !selectedPayment) {
       const msg = 'Escolha a forma de pagamento.'
       setError(msg); toast.error(msg)
+      return
+    }
+    if (step === 'pagamento' && changeError) {
+      setError(changeError); toast.error(changeError)
       return
     }
     if (step === 'confirmacao') { handleSubmit(); return }
@@ -482,7 +510,7 @@ export default function Checkout() {
     }
     if (deliverToAddress && !isAddressComplete(address)) {
       setStepIdx(steps.indexOf('entrega'))
-      setAddressOpen(true)
+      openAddress()
       return
     }
     if (pickPayment && !selectedPayment) {
@@ -490,6 +518,12 @@ export default function Checkout() {
       setStepIdx(steps.indexOf('pagamento'))
       setError(msg)
       toast.error(msg)
+      return
+    }
+    if (changeError) {
+      setStepIdx(steps.indexOf('pagamento'))
+      setError(changeError)
+      toast.error(changeError)
       return
     }
     if (mesaErp && !(await prepareMesa())) return
@@ -614,6 +648,7 @@ export default function Checkout() {
         coupon: appliedCoupon,
         clientOrderId,
         deliveryAddress: deliverToAddress ? address : null,
+        cash: askChange ? (needsChange && changeFor ? { needsChange: true, changeFor } : { needsChange: false }) : undefined,
       })
 
       const historyItems = items.map((item) => ({
@@ -686,6 +721,7 @@ export default function Checkout() {
         total: typeof result?.total === 'number' ? result.total : finalTotal,
         orderId: (result as { _id?: string } | null)?._id,
         items: historyItems,
+        ...(askChange ? { payment: { via: 'on_delivery' as const, method: 'cash' as const, ...(needsChange && changeFor ? { changeFor } : {}) } } : {}),
         ...(deliverToAddress && address ? {
           address: {
             street: address.street, number: address.number, complement: address.complement || undefined,
@@ -787,8 +823,15 @@ export default function Checkout() {
                 <span className="flex-1 text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>Receber no seu endereço</span>
                 <RadioDot selected={deliverToAddress} />
               </button>
-              {deliverToAddress && (
-                <button type="button" onClick={() => setAddressOpen(true)}
+              {deliverToAddress && book.list.length > 0 && (
+                <DeliveryAddressList book={book}
+                  onSelect={(id) => persistBook(selectAddress(book, id))}
+                  onAdd={() => openAddress(null)}
+                  onEdit={(id) => openAddress(id)}
+                  onRemove={(id) => persistBook(removeAddress(book, id))} />
+              )}
+              {deliverToAddress && book.list.length === 0 && (
+                <button type="button" onClick={() => openAddress(null)}
                   className="w-full flex items-center gap-3 px-4 py-4 text-left border-t border-dashed"
                   style={{ borderColor: 'var(--divider)' }}>
                   <span className="w-6 flex justify-center" style={{ color: 'var(--text-lo)' }}>
@@ -862,12 +905,64 @@ export default function Checkout() {
 
             {pickPayment && (
               <div role="radiogroup" aria-label="Forma de pagamento" className="flex flex-col gap-2">
-                <p className="text-base font-bold mt-2" style={{ color: 'var(--text-hi)' }}>{paymentTitle}</p>
-                {shownMethods.map((m) => (
-                  <OptionRow key={m.key} icon={PAYMENT_ICON[m.key] ?? 'cash'} title={m.label}
-                    selected={m.key === paymentKey} onClick={() => { setPaymentKey(m.key); setError(null) }} />
-                ))}
-                <p className="text-xs" style={{ color: 'var(--text-lo)' }}>{paymentHint}</p>
+                {splitPayment && (
+                  <>
+                    <p className="text-base font-bold mt-2" style={{ color: 'var(--text-hi)' }}>Pagar online</p>
+                    {onlineMethods.map((m) => (
+                      <OptionRow key={m.key} icon={PAYMENT_ICON[m.key] ?? 'cash'} title={m.label}
+                        selected={m.key === paymentKey} onClick={() => { setPaymentKey(m.key); setError(null) }} />
+                    ))}
+                  </>
+                )}
+                {onDeliveryMethods.length > 0 && (
+                  <>
+                    <p className="text-base font-bold mt-2" style={{ color: 'var(--text-hi)' }}>{paymentTitle}</p>
+                    {onDeliveryMethods.map((m) => (
+                      <OptionRow key={m.key} icon={PAYMENT_ICON[m.key] ?? 'cash'} title={m.label}
+                        selected={m.key === paymentKey} onClick={() => { setPaymentKey(m.key); setError(null) }} />
+                    ))}
+                  </>
+                )}
+                {onDeliveryMethods.length > 0 && (
+                  <p className="text-xs" style={{ color: 'var(--text-lo)' }}>{paymentHint}</p>
+                )}
+              </div>
+            )}
+
+            {pickPayment && askChange && (
+              <div className="rounded-2xl p-4 border flex flex-col gap-3" style={card}>
+                <p className="text-sm font-bold" style={{ color: 'var(--text-hi)' }}>Precisa de troco?</p>
+                <div role="radiogroup" aria-label="Precisa de troco" className="grid grid-cols-2 gap-2">
+                  {([[false, 'Não preciso'], [true, 'Sim, preciso']] as const).map(([val, label]) => (
+                    <button key={label} type="button" role="radio" aria-checked={needsChange === val}
+                      onClick={() => { setNeedsChange(val); setError(null) }}
+                      className="rounded-xl px-3 py-3 border text-sm font-semibold"
+                      style={{
+                        background: needsChange === val ? 'var(--color-brand-light)' : 'var(--bg-card)',
+                        borderColor: needsChange === val ? 'var(--color-brand)' : 'var(--border)',
+                        color: 'var(--text-hi)',
+                      }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {needsChange && (
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>Troco para quanto?</span>
+                    <input type="text" inputMode="decimal" autoComplete="off" placeholder="Ex.: 100,00"
+                      value={changeForText} onChange={(e) => { setChangeForText(e.target.value); setError(null) }}
+                      aria-invalid={changeForText !== '' && !!changeError}
+                      className="w-full rounded-xl border px-3 py-3 text-base"
+                      style={{ background: 'var(--bg-page)', borderColor: changeForText !== '' && changeError ? '#dc2626' : 'var(--border)', color: 'var(--text-hi)' }} />
+                    <span className="text-xs" style={{ color: changeForText !== '' && changeError ? '#dc2626' : 'var(--text-lo)' }}>
+                      {changeForText !== '' && changeError
+                        ? changeError
+                        : changeFor && !changeError
+                          ? `Total ${brl(finalTotal)} · o entregador leva ${brl(changeAmount(changeFor, finalTotal))} de troco`
+                          : `Total do pedido: ${brl(finalTotal)}`}
+                    </span>
+                  </label>
+                )}
               </div>
             )}
 
@@ -978,7 +1073,7 @@ export default function Checkout() {
                     {address.complement && <p className="text-xs" style={{ color: 'var(--text-lo)' }}>{address.complement}</p>}
                     <p className="text-xs" style={{ color: 'var(--text-lo)' }}>Ref: {address.reference}</p>
                   </div>
-                  <button type="button" onClick={() => setAddressOpen(true)} aria-label="Editar endereço"
+                  <button type="button" onClick={() => openAddress()} aria-label="Editar endereço"
                     className="p-2 -m-2" style={{ color: 'var(--text-lo)' }}>
                     <Icon name="edit" size={14} />
                   </button>
@@ -1156,10 +1251,10 @@ export default function Checkout() {
     </div>
 
       {addressOpen && <DeliveryAddressModal
-        initial={address}
+        initial={book.list.find((a) => a.id === editingId) ?? null}
         onClose={() => setAddressOpen(false)}
         onConfirm={(a) => {
-          setAddress(a); saveAddress(a); setAddressOpen(false); setError(null)
+          persistBook(upsertAddress(book, a, editingId)); setAddressOpen(false); setError(null)
         }}
       />}
 

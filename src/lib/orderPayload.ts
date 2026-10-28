@@ -55,6 +55,8 @@ export interface OrderPayloadInput {
   coupon?: Offer | null
   /** Delivery com entrega no endereço; ausente = retirada (ou não é delivery). */
   deliveryAddress?: DeliveryAddress | null
+  /** Delivery pago em dinheiro: se precisa de troco e para quanto. Ausente = não é dinheiro. */
+  cash?: { needsChange: boolean; changeFor?: number }
   /** UUID do envio: o mesmo em cada retentativa, para o backend não duplicar o pedido. */
   clientOrderId?: string
 }
@@ -102,7 +104,14 @@ export function buildOrderPayload(i: OrderPayloadInput) {
   const comanda = i.comanda?.trim()
   // O PDV ainda não lê `deliveryAddress`: na observação o endereço chega à loja
   const deliveryLine = i.deliveryAddress ? `ENTREGA: ${formatAddress(i.deliveryAddress)}` : ''
-  const note = [deliveryLine, i.note?.trim()].filter(Boolean).join('\n')
+  // O PDV também não lê o troco: vai na observação, para o entregador saber o que levar
+  const changeFor = i.cash?.needsChange && i.cash.changeFor ? i.cash.changeFor : 0
+  const changeBack = changeFor > 0 ? round2(changeFor - i.total) : 0
+  const cashLine = !i.cash ? ''
+    : changeFor > 0
+      ? `TROCO: levar troco para R$ ${changeFor.toFixed(2).replace('.', ',')} (R$ ${changeBack.toFixed(2).replace('.', ',')} de troco)`
+      : 'TROCO: não precisa de troco'
+  const note = [deliveryLine, cashLine, i.note?.trim()].filter(Boolean).join('\n')
 
   return {
     branch: i.branchId,
@@ -115,7 +124,8 @@ export function buildOrderPayload(i: OrderPayloadInput) {
     amount: i.total,
     subtotal: i.subtotal,
     total: i.total,
-    change: 0,
+    change: changeBack,
+    ...(changeFor > 0 ? { changeFor } : {}),
     deliveryFee: 0,
     installments: 1,
     // O cardápio não processa pagamento no pinpad. Enviar null explicitamente
@@ -141,7 +151,7 @@ export function buildOrderPayload(i: OrderPayloadInput) {
       prepaid: i.payVia === 'local' && i.payment ? i.payment.prepaid : false,
       ...(i.payVia === 'local' && i.payment ? { method: i.payment.key } : {}),
       ...(i.payVia === 'local' && i.payment?.pdvCode ? { pdvCode: i.payment.pdvCode } : {}),
-      data: { name: label, active: true, change: 0, method: 'Money' },
+      data: { name: label, active: true, change: changeBack, method: 'Money' },
     },
     additionalInfo: i.whereConsume === 'OnLocal' ? 'Consumir no local' : 'Para levar',
     whereConsume: i.whereConsume,

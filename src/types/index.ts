@@ -16,10 +16,14 @@ export interface CardapioPaymentChannel {
   totem?: boolean
   /** "Pagar no caixa" como forma de pagamento da modalidade. */
   caixa?: boolean
-  prepaid?: { online?: boolean; card?: boolean; cash?: boolean; pix?: boolean; totem?: boolean; caixa?: boolean }
+  /** Delivery: pagar online (Pix, Cartão, Dinheiro) — separado de pagar na entrega (card/cash/pix). */
+  onlinePix?: boolean
+  onlineCard?: boolean
+  onlineCash?: boolean
+  prepaid?: { online?: boolean; card?: boolean; cash?: boolean; pix?: boolean; totem?: boolean; caixa?: boolean; onlinePix?: boolean; onlineCard?: boolean; onlineCash?: boolean }
   /** Nome exibido e código do PDV de cada forma, cadastrados no painel. */
-  names?: { online?: string; card?: string; cash?: string; pix?: string; totem?: string; caixa?: string }
-  pdvCodes?: { online?: string; card?: string; cash?: string; pix?: string; totem?: string; caixa?: string }
+  names?: { online?: string; card?: string; cash?: string; pix?: string; totem?: string; caixa?: string; onlinePix?: string; onlineCard?: string; onlineCash?: string }
+  pdvCodes?: { online?: string; card?: string; cash?: string; pix?: string; totem?: string; caixa?: string; onlinePix?: string; onlineCard?: string; onlineCash?: string }
 }
 
 export interface Stock {

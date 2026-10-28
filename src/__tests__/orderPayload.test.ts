@@ -167,3 +167,40 @@ describe('delivery com entrega no endereço', () => {
     expect(p.paymentMethod.label).toBe('Pagar na retirada')
   })
 })
+
+describe('delivery pago em dinheiro: troco', () => {
+  const dinheiro = { key: 'cash', label: 'Dinheiro', prepaid: false }
+
+  it('com troco: avisa a loja para quanto levar, na observação e nos campos de troco', () => {
+    const p = buildOrderPayload(input({
+      mode: 'delivery', total: 66, subtotal: 66, payment: dinheiro, cash: { needsChange: true, changeFor: 100 },
+    }))
+    expect(p.note).toBe('TROCO: levar troco para R$ 100,00 (R$ 34,00 de troco)')
+    expect(p.change).toBe(34)
+    expect(p.changeFor).toBe(100)
+    expect(p.paymentMethod.data.change).toBe(34)
+  })
+
+  it('sem troco: diz que não precisa e não inventa valor', () => {
+    const p = buildOrderPayload(input({ mode: 'delivery', payment: dinheiro, cash: { needsChange: false } }))
+    expect(p.note).toBe('TROCO: não precisa de troco')
+    expect(p.change).toBe(0)
+    expect(p).not.toHaveProperty('changeFor')
+  })
+
+  it('o troco vem depois do endereço e antes da observação do cliente', () => {
+    const p = buildOrderPayload(input({
+      mode: 'delivery', note: 'Sem cebola', payment: dinheiro, cash: { needsChange: true, changeFor: 100 },
+      deliveryAddress: {
+        cep: '', street: 'Rua A', number: '1', district: 'Centro', complement: '', reference: 'Praça', city: 'Fortaleza', state: 'CE',
+      },
+    }))
+    expect(p.note?.split('\n').map((l) => l.split(':')[0])).toEqual(['ENTREGA', 'TROCO', 'Sem cebola'])
+  })
+
+  it('outra forma de pagamento: nada de troco (change segue 0, campo obrigatório do Laravel)', () => {
+    const p = buildOrderPayload(input({ mode: 'delivery' }))
+    expect(p.change).toBe(0)
+    expect(p.note).toBeNull()
+  })
+})
