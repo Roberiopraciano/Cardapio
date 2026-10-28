@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCartStore } from '../store/cartStore'
 import { useAppStore } from '../store/appStore'
-import { api, OrderError } from '../api/client'
+import { api, OrderError, MesaError } from '../api/client'
 import { formatCurrency, calcCartItemSubtotal, calcPackagingTotal, calcTmProduto } from '../lib/pricing'
 import { checkBranchOpen } from '../lib/businessPeriod'
 import { isOutOfStock, checkValidPeriod } from '../lib/stock'
@@ -27,6 +27,13 @@ import { paymentOptionsFor } from '../lib/paymentOptions'
 import { locationTypeFor } from '../lib/locationType'
 import PinModal from '../components/PinModal'
 import { isPinStillValid, markPinVerified } from '../lib/pin'
+import MesaBlockedModal from '../components/MesaBlockedModal'
+import {
+  classifyMesa, loadMesaSession, saveMesaSession, clearMesaSession, getMesaClientOrderId,
+  adoptClientOrderId, buildMesaItems, MesaItemError, mesaErrorMessage, SESSION_ERROR_CODES,
+  type MesaStatusData,
+} from '../lib/mesaErp'
+import { tableLabel } from '../lib/tableLabel'
 
 export default function Checkout() {
   const navigate = useNavigate()
@@ -38,7 +45,7 @@ export default function Checkout() {
     setCoupon, total, totalWithCoupon, itemCount, clearCart, loadSavedClient,
     comanda, setComanda, clearCartKeepCodes, setWhereConsumeAsked,
   } = useCartStore()
-  const { branch, params, periods } = useAppStore()
+  const { branch, params, periods, products } = useAppStore()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [couponInput, setCouponInput] = useState(couponCode)
@@ -47,6 +54,11 @@ export default function Checkout() {
   const [confirmModality, setConfirmModality] = useState(false)
   const [pinOpen, setPinOpen] = useState(false)
   const [paymentKey, setPaymentKey] = useState<string | null>(null)
+  // Mesa integrada ao ERP: PIN só para ABRIR a mesa; mesa de outro canal pede o garçom
+  const [erpPinOpen, setErpPinOpen] = useState(false)
+  const [mesaBlocked, setMesaBlocked] = useState<'ocupada' | 'bloqueada' | null>(null)
+  // A resposta do envio pode ter se perdido: o botão vira "Tentar novamente" (mesmo loteId)
+  const [needsRetry, setNeedsRetry] = useState(false)
   // undefined = consultando; null = mesa sem número cadastrado
   const [tableNumber, setTableNumber] = useState<number | null | undefined>(undefined)
   const [openedAt] = useState(() => new Date())
@@ -92,7 +104,9 @@ export default function Checkout() {
     && (otherMethods.length === 0 || (pickPayment && selectedPayment?.key === 'totem'))
 
   /** PIN ao enviar o pedido: só na mesa, e não no totem (lá quem confirma é o TEF). */
-  const pinEnabled = mode === 'mesa' && branch?.settingsWeb?.usePinOnPayment === true
+  const mesaErp = mode === 'mesa' && branch?.settingsWeb?.mesaErpEnabled === true
+  // Com a mesa no ERP o PIN passa a abrir a mesa (ver `prepareMesa`), não a confirmar cada envio
+  const pinEnabled = mode === 'mesa' && branch?.settingsWeb?.usePinOnPayment === true && !mesaErp
   const pinRequired = pinEnabled && !viaTotem && typeof tableNumber === 'number'
 
   // Comanda por cliente dentro da mesa — só quando a branch liga a opção
@@ -157,7 +171,7 @@ export default function Checkout() {
   // ou a mesa não tiver número, o PIN não pode ser conferido: segue sem ele, em
   // vez de travar a venda por um soluço de rede.
   useEffect(() => {
-    if (!pinEnabled || !params?.branchId || !params.table) return
+    if (!(pinEnabled || mesaErp) || !params?.branchId || !params.table) return
     let cancelled = false
     api.getTableNumber(params.branchId, params.table)
       .then((n) => { if (!cancelled) setTableNumber(n) })
@@ -166,7 +180,7 @@ export default function Checkout() {
         if (!cancelled) setTableNumber(null)
       })
     return () => { cancelled = true }
-  }, [pinEnabled, params?.branchId, params?.table])
+  }, [pinEnabled, mesaErp, params?.branchId, params?.table])
 
   // A cotação pertence ao carrinho que foi validado. Se quantidade ou itens
   // mudarem, remove o desconto antigo e exige uma nova validação na API.
@@ -252,6 +266,114 @@ export default function Checkout() {
   }
 
   /** `pinOk`: o modal do PIN já validou — pula direto para o envio. */
+  const mesaBranchId = params?.branchId ?? ''
+  const mesaTable = params?.table ?? ''
+
+  /**
+   * Mesa integrada ao ERP: garante uma sessão válida antes de enviar.
+   * @returns true se já dá para lançar; false se parou num passo que tem tela
+   * (PIN para abrir, mesa ocupada, erro) — quem chamou apenas retorna.
+   */
+  const prepareMesa = async (): Promise<boolean> => {
+    if (tableNumber === undefined) {
+      setError('Aguarde um instante e confirme de novo.')
+      return false
+    }
+    if (tableNumber === null) {
+      const msg = 'Esta mesa não tem número cadastrado. Chame o garçom.'
+      setError(msg); toast.error(msg)
+      return false
+    }
+    if (loadMesaSession(mesaBranchId, mesaTable)) return true
+
+    const clientOrderId = getMesaClientOrderId(mesaBranchId, mesaTable)
+    setLoading(true); setError(null)
+    try {
+      const res = await api.mesaStatus({ branchId: mesaBranchId, clientOrderId, numeroMesa: tableNumber })
+      const gate = classifyMesa(res.data as MesaStatusData, clientOrderId)
+      if (gate === 'minha' && res.mesaToken) {
+        saveMesaSession(mesaBranchId, mesaTable, { clientOrderId, mesaToken: res.mesaToken, numeroMesa: tableNumber })
+        return true
+      }
+      // 'minha' sem token = a nuvem não conhece essa sessão: refaz pelo PIN
+      if (gate === 'livre' || gate === 'minha') { setErpPinOpen(true); return false }
+      setMesaBlocked(gate)
+      return false
+    } catch (e) {
+      const msg = e instanceof MesaError
+        ? mesaErrorMessage(e.code, e.isOffline ? 'Não foi possível falar com o restaurante. Verifique a conexão.' : undefined)
+        : 'Não foi possível verificar a mesa. Tente novamente.'
+      setError(msg); toast.error(msg)
+      return false
+    } finally { setLoading(false) }
+  }
+
+  /** PIN certo na tela (mesa + hora): abre a mesa na loja e segue com o envio. */
+  const abrirMesa = async (pin: string) => {
+    setErpPinOpen(false)
+    if (typeof tableNumber !== 'number') return
+    setLoading(true); setError(null)
+    try {
+      const res = await api.mesaAbrir({
+        branchId: mesaBranchId, numeroMesa: tableNumber, pin,
+        nomeCliente: clientName.trim() || undefined,
+      })
+      const clientOrderId = String(res.data?.clientOrderId ?? '')
+      if (!clientOrderId || !res.mesaToken) throw new MesaError(500)
+      adoptClientOrderId(mesaBranchId, mesaTable, clientOrderId)
+      saveMesaSession(mesaBranchId, mesaTable, { clientOrderId, mesaToken: res.mesaToken, numeroMesa: tableNumber })
+      markPinVerified(tableNumber)
+    } catch (e) {
+      const msg = e instanceof MesaError ? mesaErrorMessage(e.code) : 'Não foi possível abrir a mesa. Chame o garçom.'
+      setError(msg); toast.error(msg)
+      setLoading(false)
+      return
+    }
+    setLoading(false)
+    handleSubmit(true)
+  }
+
+  const chamarGarcom = async () => {
+    if (typeof tableNumber !== 'number') throw new Error('mesa sem número')
+    await api.mesaChamarGarcom({
+      branchId: mesaBranchId,
+      clientOrderId: getMesaClientOrderId(mesaBranchId, mesaTable),
+      numeroMesa: tableNumber,
+      nomeCliente: clientName.trim() || undefined,
+      motivo: 'Mesa já aberta - cliente quer pedir',
+    })
+  }
+
+  /**
+   * Lança os itens na loja. O `loteId` é o id deste checkout: reenviar depois de
+   * timeout não duplica (a loja devolve o lote original). Se a resposta se perdeu,
+   * pergunta à loja se o lote chegou antes de dar o pedido como falho.
+   */
+  const lancarNaMesa = async (loteId: string) => {
+    const session = loadMesaSession(mesaBranchId, mesaTable)
+    if (!session) throw new MesaError(401, 'TOKEN_MESA_INVALIDO')
+    const body = {
+      branchId: mesaBranchId,
+      clientOrderId: session.clientOrderId,
+      numeroMesa: session.numeroMesa,
+      loteId,
+      nomeCliente: clientName.trim() || undefined,
+      itens: buildMesaItems(items, products),
+    }
+    try {
+      return await api.mesaLancar(body, session.mesaToken)
+    } catch (e) {
+      if (e instanceof MesaError && e.isIndeterminate) {
+        try {
+          const r = await api.mesaLoteStatus(
+            { branchId: mesaBranchId, clientOrderId: session.clientOrderId, loteId }, session.mesaToken)
+          if (r.data?.resultado === 'CONFIRMADO') return { success: true }
+        } catch { /* sem resposta de novo: segue o erro original */ }
+      }
+      throw e
+    }
+  }
+
   const handleSubmit = async (pinOk = false) => {
     // Nome e telefone são exigidos nos dois modos: a cozinha e o garçom
     // precisam saber de quem é o pedido, e a conta precisa de dono.
@@ -283,6 +405,7 @@ export default function Checkout() {
       toast.error(msg)
       return
     }
+    if (mesaErp && !(await prepareMesa())) return
     if (pinEnabled && !viaTotem && tableNumber === undefined) {
       setError('Aguarde um instante e confirme de novo.')
       return
@@ -455,7 +578,10 @@ export default function Checkout() {
         return
       }
 
-      const result = await api.postOrder(payload)
+      const result = mesaErp
+        ? { ...(await lancarNaMesa(clientOrderId)), total: finalTotal }
+        : await api.postOrder(payload)
+      setNeedsRetry(false)
 
       // Registro local do cliente. Depois do POST e fora do caminho de erro:
       // falha ao gravar histórico não pode impedir a confirmação de um pedido
@@ -479,9 +605,18 @@ export default function Checkout() {
     } catch (e) {
       // Mensagem específica por causa: CORS, simpleAuth recusado e validação
       // exigem consertos diferentes, e "tente novamente" não distingue nenhum
-      const msg = e instanceof OrderError
-        ? e.clientMessage
-        : 'Erro ao enviar pedido. Tente novamente.'
+      if (e instanceof MesaError && e.code && (SESSION_ERROR_CODES.includes(e.code)
+        || ['MESA_JA_PAGA', 'MESA_CANCELADA'].includes(e.code))) {
+        clearMesaSession(mesaBranchId, mesaTable)
+      }
+      setNeedsRetry(e instanceof MesaError && e.isIndeterminate)
+      const msg = e instanceof MesaError
+        ? mesaErrorMessage(e.code, e.isOffline ? 'Não foi possível falar com o restaurante. Verifique a conexão.' : e.serverMessage)
+        : e instanceof MesaItemError
+          ? e.message
+          : e instanceof OrderError
+            ? e.clientMessage
+            : 'Erro ao enviar pedido. Tente novamente.'
       setError(msg)
       toast.error(msg)
     } finally { setLoading(false) }
@@ -801,6 +936,7 @@ export default function Checkout() {
           style={{ backgroundColor: 'var(--color-brand)' }}>
           {loading
             ? (viaTotem ? 'Gerando QR Code...' : 'Enviando...')
+            : needsRetry ? 'Tentar novamente'
             : viaTotem ? 'Gerar QR Code para o totem'
             : mode === 'mesa' ? 'Fazer pedido na mesa'
               : mode === 'delivery' ? 'Fazer pedido' : 'Fazer pedido no balcão'}
@@ -820,6 +956,24 @@ export default function Checkout() {
           }}
         />
       )}
+
+      {mesaErp && typeof tableNumber === 'number' && (
+        <PinModal
+          open={erpPinOpen}
+          tableNumber={tableNumber}
+          openedAt={openedAt}
+          onCancel={() => setErpPinOpen(false)}
+          onConfirm={abrirMesa}
+        />
+      )}
+
+      <MesaBlockedModal
+        open={mesaBlocked !== null}
+        reason={mesaBlocked ?? 'ocupada'}
+        tableLabel={tableLabel(params?.table)}
+        onCallWaiter={chamarGarcom}
+        onClose={() => setMesaBlocked(null)}
+      />
 
       <ConfirmModal
         open={confirmModality}

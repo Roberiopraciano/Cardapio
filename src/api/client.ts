@@ -284,6 +284,68 @@ export interface TotemHandoff {
  */
 export type TotemHandoffStatus = 'pending' | 'consumed' | 'cancelled' | 'expired'
 
+
+/**
+ * Falha numa chamada de `api/mesa/*` (mesa integrada ao ERP da loja).
+ *
+ * Guarda o `code` que o Laravel/loja devolveu (`PIN_INVALIDO`, `MOVIMENTO_FECHADO`,
+ * `LOJA_OFFLINE_TIMEOUT`...), porque é ele — e não o status HTTP — que decide a
+ * mensagem e a ação na tela. `status: 0` = a requisição não chegou.
+ */
+export class MesaError extends Error {
+  readonly status: number
+  readonly code?: string
+  readonly serverMessage?: string
+
+  constructor(status: number, code?: string, serverMessage?: string) {
+    super(`api/mesa falhou (${status}${code ? ` ${code}` : ''})`)
+    this.name = 'MesaError'
+    this.status = status
+    this.code = code
+    this.serverMessage = serverMessage
+  }
+
+  /** Não chegou ao servidor (rede, CORS, timeout do navegador). */
+  get isOffline(): boolean {
+    return this.status === 0
+  }
+
+  /** O pedido pode ter chegado na loja: só resposta perdida (timeout/rede), nunca recusa. */
+  get isIndeterminate(): boolean {
+    return this.status === 0 || this.status === 504 || this.code === 'LOJA_OFFLINE_TIMEOUT'
+  }
+}
+
+export interface MesaCallResult<T> {
+  success: boolean
+  data?: T
+  mesaToken?: string
+  origem?: string
+  [k: string]: unknown
+}
+
+async function mesaCall<T>(path: string, body: unknown, token?: string): Promise<MesaCallResult<T>> {
+  let res: Response
+  try {
+    res = await fetch(`${BASE_URL}/api/mesa/${path}`, withTimeout({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    }))
+  } catch (e) {
+    throw new MesaError(0, undefined, e instanceof Error ? e.message : 'network')
+  }
+  const json = await res.json().catch(() => null) as (MesaCallResult<T> & { error?: { code?: string; message?: string }; message?: string }) | null
+  if (!res.ok || json?.success === false) {
+    throw new MesaError(res.status, json?.error?.code, json?.error?.message ?? json?.message)
+  }
+  return json ?? { success: true }
+}
+
 export const api = {
   /** Número cadastrado da mesa, pelo código do QR Code. `null` = mesa sem número. */
   getTableNumber: async (branchId: string, code: string): Promise<number | null> => {
@@ -437,6 +499,25 @@ export const api = {
       return { ok: false }
     }
   },
+
+
+  // ─── Mesa integrada ao ERP (docs: TotemApiv2/docs/MESA_SERVICE.md) ─────────
+  mesaStatus: (p: { branchId: string; clientOrderId: string; numeroMesa?: number }) =>
+    mesaCall<Record<string, unknown>>('status', p),
+
+  mesaAbrir: (p: { branchId: string; numeroMesa: number; pin: string; nomeCliente?: string }) =>
+    mesaCall<{ clientOrderId?: string } & Record<string, unknown>>('abrir', p),
+
+  mesaLancar: (p: {
+    branchId: string; clientOrderId: string; numeroMesa: number; loteId: string
+    nomeCliente?: string; itens: unknown[]
+  }, token: string) => mesaCall<Record<string, unknown>>('lancar', p, token),
+
+  mesaLoteStatus: (p: { branchId: string; clientOrderId: string; loteId: string }, token: string) =>
+    mesaCall<{ resultado: 'CONFIRMADO' | 'NAO_LANCADO' | 'INDETERMINADO'; podeReenviar: boolean }>('lote-status', p, token),
+
+  mesaChamarGarcom: (p: { branchId: string; clientOrderId: string; numeroMesa: number; nomeCliente?: string; motivo?: string }) =>
+    mesaCall<Record<string, unknown>>('chamar-garcom', { ...p, tipo: 1 }),
 
   /** GET api/orders por consumptioncode — polling de status e conta da mesa */
   getOrdersByCode: (consumptioncode: string, branchId: string, simpleAuth: string) =>

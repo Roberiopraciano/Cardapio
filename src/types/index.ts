@@ -286,6 +286,12 @@ export interface Branch {
     totemPaymentEnabled?: boolean
     /** Confirmação de pagamento na mesa por PIN (mesa + hora). Exclusivo com o QR Code. */
     usePinOnPayment?: boolean
+    /**
+     * Mesa integrada ao ERP da loja: abre a mesa com PIN e lança os itens direto
+     * no PDV (em vez de só gravar o pedido na nuvem). Padrão: desligado. Só vale
+     * na mesa. Ver `lib/mesaErp.ts`.
+     */
+    mesaErpEnabled?: boolean
     useQrCodeOnPayment?: boolean
     paymentMethods?: {
       payAtCounter?: boolean

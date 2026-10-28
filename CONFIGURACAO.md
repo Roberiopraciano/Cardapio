@@ -545,3 +545,8 @@ Roteiro completo no [`DEPLOY.md`](DEPLOY.md) §6. Os que mais pegam:
 - [ ] QR inválido → botão de câmera funciona no iOS **e** no Android
 - [ ] Pedido com 2× de um item que tem 2× de bebida → conta 4 bebidas
 - [ ] Trocar modalidade com carrinho cheio → modal avisa antes de esvaziar
+
+### `settingsWeb.mesaErpEnabled` (boolean, padrão `false`)
+Mesa integrada ao ERP da loja. Só vale em `mode=mesa`. Ligado, o envio do pedido abre a mesa com PIN e
+lança os itens direto no PDV (`api/mesa/*`), em vez de `POST api/orders`; mesa já aberta pelo garçom
+pede para chamar o garçom. Liga-se no painel (Config. Cardápio da filial). Ver `src/lib/mesaErp.ts` e `TotemApiv2/docs/MESA_SERVICE_IMPLEMENTACAO.md` §7.

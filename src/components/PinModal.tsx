@@ -19,8 +19,8 @@ export default function PinModal({
   open: boolean
   tableNumber: number
   openedAt: Date
-  /** PIN correto — quem chamou envia o pedido */
-  onConfirm: () => void
+  /** PIN correto (já conferido por mesa + hora) — quem chamou segue com o pedido; recebe o PIN digitado */
+  onConfirm: (pin: string) => void
   onCancel: () => void
 }) {
   const [pin, setPin] = useState('')
@@ -56,7 +56,7 @@ export default function PinModal({
 
   const submit = () => {
     if (isPinValid(pin, tableNumber, new Date(), openedAt)) {
-      onConfirm()
+      onConfirm(pin.replace(/\D/g, ''))
     } else {
       setWrong(true)
       setPin('')
