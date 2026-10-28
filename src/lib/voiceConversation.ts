@@ -135,6 +135,55 @@ export function exampleOrders(products: Product[]): string[] {
   return [`Quero um ${names[0]}`, `Um ${names[0]} e um ${names[1]}`]
 }
 
+/**
+ * ⚠️ EXPERIMENTO LIGADO — modo cards do assistente.
+ * Quando as opções de uma pergunta são produtos, mostra cards com foto em vez da lista de botões de texto.
+ * `?aicards=0` no link volta para a lista; `?aicards=1` força os cards. Sem o parâmetro, vale esta constante.
+ */
+export const VOICE_CARDS_MODE = true
+
+export function voiceCardsEnabled(search = typeof location === 'undefined' ? '' : location.search): boolean {
+  const flag = new URLSearchParams(search).get('aicards')
+  return flag === null ? VOICE_CARDS_MODE : flag !== '0'
+}
+
+export interface ChoiceVisual {
+  image: string
+  description: string
+}
+
+/** Produtos e opcionais do cardápio local por id (um opcional só existe dentro do grupo do produto). */
+export function visualIndex(products: Product[]): Map<string, ChoiceVisual> {
+  const index = new Map<string, ChoiceVisual>()
+  for (const product of products) {
+    for (const group of product.complementsGroups ?? []) {
+      for (const option of group.products ?? []) {
+        if (!index.has(option._id)) index.set(option._id, { image: option.image ?? '', description: '' })
+      }
+    }
+  }
+  // Produto por último: vale a foto e a descrição dele mesmo quando também aparece como opcional
+  for (const product of products) index.set(product._id, { image: product.image ?? '', description: product.description ?? '' })
+  return index
+}
+
+/**
+ * Foto e descrição de cada opção, na ordem de options, ou null quando a pergunta não vira cards:
+ * opção sem produto (categoria, "Refrigerantes"), produto que o cardápio local não tem, ou nenhuma opção com foto
+ * (cards só com a inicial não ajudam mais que a lista).
+ */
+export function choiceVisuals(question: VoiceQuestion, index: Map<string, ChoiceVisual>): ChoiceVisual[] | null {
+  const ids = question.product_ids ?? []
+  if (ids.length !== question.options.length || question.options.length === 0) return null
+  const visuals: ChoiceVisual[] = []
+  for (const id of ids) {
+    const visual = id ? index.get(id) : undefined
+    if (!visual) return null
+    visuals.push(visual)
+  }
+  return visuals.some(visual => visual.image) ? visuals : null
+}
+
 /** Falhas da conferência local do pedido (cardápio do app x servidor): só estas significam "o cardápio mudou". */
 const MENU_MISMATCH = ['Produto alterado', 'Opcional alterado', 'Preço alterado']
 

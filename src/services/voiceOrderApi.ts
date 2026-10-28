@@ -95,6 +95,8 @@ export interface VoiceQuestion {
   prices?: string[]
   /** Preço "de" (riscado) dos produtos em promoção; vazio nos demais. `prices` traz o "para". */
   original_prices?: string[]
+  /** Produto (ou opcional) de cada opção, na mesma ordem de options; '' quando a opção não é produto (categoria). */
+  product_ids?: string[]
   optional: boolean
 }
 

@@ -5,12 +5,13 @@ import { confirmVoiceReview, type VoiceItem, type VoiceQuestion, type VoiceRevie
 import { useAudioRecorder } from '../../hooks/useAudioRecorder'
 import { useVoiceConversation } from '../../hooks/useVoiceConversation'
 import {
-  addToCartErrorCode, canContinue, errorMessage, exampleOrders, isRetryable, statusMessage, summaryTotal,
-  toAnswers, visibleChat, type Selection,
+  addToCartErrorCode, canContinue, choiceVisuals, errorMessage, exampleOrders, isRetryable, statusMessage, summaryTotal,
+  toAnswers, visibleChat, visualIndex, voiceCardsEnabled, type ChoiceVisual, type Selection,
 } from '../../lib/voiceConversation'
 import ConfirmModal from '../ConfirmModal'
 import Icon from '../Icon'
 import OrderSummary from './OrderSummary'
+import ProductChoiceCards from './ProductChoiceCards'
 import QuestionCard from './QuestionCard'
 import VoiceWave from './VoiceWave'
 import VoiceOrderReviewModal from './VoiceOrderReviewModal'
@@ -57,9 +58,11 @@ function Thinking({ label }: { label: string }) {
  * As perguntas da rodada. Com uma só pergunta, tocar na resposta já envia; com várias, o cliente
  * escolhe em cada cartão e toca em "Continuar". Remonta (zera as escolhas) a cada rodada nova.
  */
-function QuestionStep({ questions, busy, onSubmit }: {
+function QuestionStep({ questions, busy, visuals, onSubmit }: {
   questions: VoiceQuestion[]
   busy: boolean
+  /** fotos do cardápio por id; null = modo cards desligado */
+  visuals: Map<string, ChoiceVisual> | null
   onSubmit: (answers: ReturnType<typeof toAnswers>, outgoing: string) => void
 }) {
   const [selection, setSelection] = useState<Selection>({})
@@ -73,16 +76,19 @@ function QuestionStep({ questions, busy, onSubmit }: {
   }
   return (
     <div className="space-y-2">
-      {questions.map(question => (
-        <QuestionCard
-          key={question.id}
-          question={question}
-          selected={selection[question.id]}
-          disabled={busy}
-          onPick={index => choose(question, index)}
-          onSkip={() => choose(question, 'skip')}
-        />
-      ))}
+      {questions.map(question => {
+        const cards = visuals ? choiceVisuals(question, visuals) : null
+        const props = {
+          question,
+          selected: selection[question.id],
+          disabled: busy,
+          onPick: (index: number) => choose(question, index),
+          onSkip: () => choose(question, 'skip'),
+        }
+        return cards
+          ? <ProductChoiceCards key={question.id} visuals={cards} {...props} />
+          : <QuestionCard key={question.id} {...props} />
+      })}
       {!single && (
         <button
           type="button"
@@ -116,6 +122,7 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
   const [micSupported] = useState(() =>
     typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined')
   const [examples] = useState(() => exampleOrders(products))
+  const [visuals] = useState(() => voiceCardsEnabled() ? visualIndex(products) : null)
   const panelRef = useRef<HTMLElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const startedAt = useRef(0)
@@ -287,7 +294,7 @@ export default function VoiceOrderAssistant({ branchId, products, onAdd, onClose
           {busy && <Thinking label={conversation ? 'Conferindo…' : 'Montando seu pedido…'} />}
 
           {!busy && questions.length > 0 && (
-            <QuestionStep key={stepKey} questions={questions} busy={busy} onSubmit={answer} />
+            <QuestionStep key={stepKey} questions={questions} busy={busy} visuals={visuals} onSubmit={answer} />
           )}
 
           {!busy && closing && <Bubble role="assistant">{closing}</Bubble>}

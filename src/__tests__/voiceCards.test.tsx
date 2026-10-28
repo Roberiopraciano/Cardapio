@@ -7,6 +7,9 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import QuestionCard from '../components/VoiceOrder/QuestionCard'
 import OrderSummary from '../components/VoiceOrder/OrderSummary'
+import ProductChoiceCards from '../components/VoiceOrder/ProductChoiceCards'
+import { choiceVisuals, visualIndex, voiceCardsEnabled, VOICE_CARDS_MODE } from '../lib/voiceConversation'
+import type { Product } from '../types'
 import type { VoiceQuestion, VoiceReview } from '../services/voiceOrderApi'
 
 const noop = () => undefined
@@ -114,5 +117,45 @@ describe('OrderSummary', () => {
     const incomplete = review()
     incomplete.items[0].validation_status = 'missing_options'
     expect(renderToStaticMarkup(<OrderSummary review={incomplete} />)).toContain('faltam escolhas')
+  })
+})
+
+describe('modo cards do assistente', () => {
+  const products = [
+    { _id: 'p1', name: 'Frango com salada', description: 'Peito grelhado e folhas', image: 'https://x/p1.jpg', complementsGroups: [
+      { _id: 'g1', products: [{ _id: 'o1', name: 'Coca', image: 'https://x/o1.jpg' }] },
+    ] },
+    { _id: 'p2', name: 'Frango com bacon', image: '', complementsGroups: [] },
+  ] as unknown as Product[]
+  const index = visualIndex(products)
+
+  it('liga por padrão e respeita ?aicards=0 / ?aicards=1', () => {
+    expect(voiceCardsEnabled('')).toBe(VOICE_CARDS_MODE)
+    expect(voiceCardsEnabled('?aicards=0')).toBe(false)
+    expect(voiceCardsEnabled('?aicards=1')).toBe(true)
+  })
+
+  it('acha foto e descrição de produtos e de opcionais, na ordem das opções', () => {
+    const visuals = choiceVisuals(question({ options: ['Frango com bacon', 'Frango com salada', 'Coca'], product_ids: ['p2', 'p1', 'o1'] }), index)
+    expect(visuals?.map(visual => visual.image)).toEqual(['', 'https://x/p1.jpg', 'https://x/o1.jpg'])
+    expect(visuals?.[1].description).toBe('Peito grelhado e folhas')
+  })
+
+  it('não vira cards sem produto em toda opção, com produto desconhecido ou sem nenhuma foto', () => {
+    expect(choiceVisuals(question(), index)).toBeNull()
+    expect(choiceVisuals(question({ options: ['Refrigerantes', 'Sucos'], product_ids: ['', ''] }), index)).toBeNull()
+    expect(choiceVisuals(question({ options: ['A', 'B'], product_ids: ['p1', 'sumiu'] }), index)).toBeNull()
+    expect(choiceVisuals(question({ options: ['Frango com bacon'], product_ids: ['p2'] }), index)).toBeNull()
+  })
+
+  it('desenha um card por opção com nome, descrição e preço', () => {
+    const q = question({ options: ['Frango com salada', 'Frango com bacon'], product_ids: ['p1', 'p2'], prices: ['R$ 29,90', 'R$ 32,90'] })
+    const markup = renderToStaticMarkup(
+      <ProductChoiceCards question={q} visuals={choiceVisuals(q, index)!} selected={1} disabled={false} onPick={noop} onSkip={noop} />)
+    expect(markup.match(/role="radio"/g)).toHaveLength(2)
+    expect(markup.match(/aria-checked="true"/g)).toHaveLength(1)
+    expect(markup).toContain('Peito grelhado e folhas')
+    expect(markup).toContain('R$ 32,90')
+    expect(markup).not.toContain('Não, obrigado')
   })
 })
