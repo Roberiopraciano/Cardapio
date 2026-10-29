@@ -26,6 +26,12 @@ describe('classifyMesa', () => {
     expect(classifyMesa({ encontrada: true, clientOrderId: MINE.toUpperCase(), venStatus: 1, podeLancarItens: true }, MINE)).toBe('minha')
   })
 
+  it('venda já paga ou cancelada = livre: o próximo cliente abre outra com o PIN', () => {
+    expect(classifyMesa({ encontrada: true, clientOrderId: MINE, venStatus: 0, podeLancarItens: false }, MINE)).toBe('livre')
+    expect(classifyMesa({ encontrada: true, clientOrderId: 'outro', venStatus: 9, podeLancarItens: false }, MINE)).toBe('livre')
+    expect(classifyMesa({ encontrada: true, status: 'PAGA' }, MINE)).toBe('livre')
+  })
+
   it('mesa em pagamento/conferência = bloqueada, seja a comanda deste aparelho ou de outro canal', () => {
     expect(classifyMesa({ encontrada: true, clientOrderId: MINE, venStatus: 3, podeLancarItens: false }, MINE)).toBe('bloqueada')
     expect(classifyMesa({ encontrada: true, clientOrderId: MINE, venStatus: 70 }, MINE)).toBe('bloqueada')

@@ -20,7 +20,7 @@ import type { CartItem, Product } from '../types'
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 export type MesaGate =
-  /** Mesa fechada: precisa do PIN para abrir. */
+  /** Mesa fechada, ou com a venda já paga/cancelada: precisa do PIN para abrir uma nova. */
   | 'livre'
   /** Mesa aberta e vinculada a este aparelho: pode lançar. */
   | 'minha'
@@ -41,6 +41,10 @@ export interface MesaStatusData {
 
 export function classifyMesa(data: MesaStatusData | null | undefined, clientOrderId: string): MesaGate {
   if (!data || data.encontrada === false || data.status === 'NAO_ENCONTRADA') return 'livre'
+
+  // Venda finalizada (paga = 0, cancelada = 9): a mesa está livre para o próximo cliente,
+  // que abre outra venda com o PIN. Só pagamento (3) e conferência (70) seguem bloqueados.
+  if (data.venStatus === 0 || data.venStatus === 9 || data.status === 'PAGA' || data.status === 'CANCELADA') return 'livre'
 
   // Fechando conta/encerrada: ninguém lança, seja a comanda de quem for
   if (data.podeLancarItens === false || (data.venStatus != null && data.venStatus !== 1)) return 'bloqueada'
@@ -103,6 +107,15 @@ export function getMesaClientOrderId(branchId: string, table: string): string {
     return crypto.randomUUID()
   }
 }
+
+/** A venda deste id terminou (paga/cancelada): o próximo pedido nesta mesa abre uma venda nova, com id novo. */
+export function resetMesaClientOrderId(branchId: string, table: string): void {
+  clearMesaSession(branchId, table)
+  try { localStorage.removeItem(idKey(branchId, table)) } catch { /* storage bloqueado */ }
+}
+
+/** Venda encerrada: não se lança mais nela, mas a mesa pode ser aberta de novo. */
+export const MESA_ENDED_CODES = ['MESA_JA_PAGA', 'MESA_CANCELADA']
 
 /** A mesa foi aberta com outro `clientOrderId` (resposta de `abrir` reaproveitou uma sessão): passa a valer o dele. */
 export function adoptClientOrderId(branchId: string, table: string, clientOrderId: string): void {

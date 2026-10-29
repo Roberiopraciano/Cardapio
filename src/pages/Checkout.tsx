@@ -29,7 +29,7 @@ import { isPinStillValid, markPinVerified } from '../lib/pin'
 import MesaBlockedModal from '../components/MesaBlockedModal'
 import {
   classifyMesa, loadMesaSession, saveMesaSession, clearMesaSession, getMesaClientOrderId,
-  adoptClientOrderId, buildMesaItems, MesaItemError, mesaErrorMessage, SESSION_ERROR_CODES,
+  adoptClientOrderId, buildMesaItems, MesaItemError, mesaErrorMessage, SESSION_ERROR_CODES, resetMesaClientOrderId, MESA_ENDED_CODES,
   type MesaStatusData,
 } from '../lib/mesaErp'
 import { tableLabel } from '../lib/tableLabel'
@@ -403,8 +403,8 @@ export default function Checkout() {
         saveMesaSession(mesaBranchId, mesaTable, { clientOrderId, mesaToken: res.mesaToken, numeroMesa: tableNumber })
         return true
       }
-      // Mesa fechada: só o PIN abre
-      if (gate === 'livre') { setErpPinOpen(true); return false }
+      // Mesa fechada (ou venda anterior já paga/cancelada): só o PIN abre, e com id novo
+      if (gate === 'livre') { resetMesaClientOrderId(mesaBranchId, mesaTable); setErpPinOpen(true); return false }
       if (gate === 'bloqueada') { setMesaBlocked('bloqueada'); return false }
       // Mesa já aberta (garçom/PDV/outro aparelho): entra na mesma comanda, sem PIN
       // ('minha' sem token = a nuvem perdeu a sessão: também se resolve por aqui)
@@ -416,9 +416,13 @@ export default function Checkout() {
       return true
     } catch (e) {
       // A mesa fechou entre a consulta e a entrada: segue para o PIN
-      if (e instanceof MesaError && e.code === 'MESA_FECHADA') { setErpPinOpen(true); return false }
-      // Pagamento/conferência/encerrada: não lança, mas dá a saída de chamar o garçom
-      if (e instanceof MesaError && e.code && ['MESA_BLOQUEADA_PAGAMENTO', 'MESA_EM_CONFERENCIA', 'MESA_JA_PAGA', 'MESA_CANCELADA'].includes(e.code)) {
+      if (e instanceof MesaError && (e.code === 'MESA_FECHADA' || (e.code && MESA_ENDED_CODES.includes(e.code)))) {
+        resetMesaClientOrderId(mesaBranchId, mesaTable)
+        setErpPinOpen(true)
+        return false
+      }
+      // Pagamento/conferência: não lança, mas dá a saída de chamar o garçom
+      if (e instanceof MesaError && e.code && ['MESA_BLOQUEADA_PAGAMENTO', 'MESA_EM_CONFERENCIA'].includes(e.code)) {
         setMesaBlocked('bloqueada')
         return false
       }
@@ -748,8 +752,14 @@ export default function Checkout() {
     } catch (e) {
       // Mensagem específica por causa: CORS, simpleAuth recusado e validação
       // exigem consertos diferentes, e "tente novamente" não distingue nenhum
-      if (e instanceof MesaError && e.code && (SESSION_ERROR_CODES.includes(e.code)
-        || ['MESA_JA_PAGA', 'MESA_CANCELADA'].includes(e.code))) {
+      if (e instanceof MesaError && e.code && MESA_ENDED_CODES.includes(e.code)) {
+        // A venda desta mesa terminou: o pedido não foi lançado; o PIN abre uma venda nova (id novo)
+        resetMesaClientOrderId(mesaBranchId, mesaTable)
+        setErpPinOpen(true)
+        setLoading(false)
+        return
+      }
+      if (e instanceof MesaError && e.code && SESSION_ERROR_CODES.includes(e.code)) {
         clearMesaSession(mesaBranchId, mesaTable)
       }
       setNeedsRetry(e instanceof MesaError && e.isIndeterminate)
